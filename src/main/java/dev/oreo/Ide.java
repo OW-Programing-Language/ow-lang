@@ -33,7 +33,9 @@ import java.util.Set;
 public class Ide extends JFrame {
 
     private static final Set<String> KEYWORDS = Set.of(
-            "main", "set", "print", "if", "else", "while", "fn", "return", "call", "true", "false"
+            "main", "set", "print", "if", "else", "while", "fn", "return", "call", "true", "false",
+            "switch", "case", "default", "enum", "interface", "class", "field", "new", "this",
+            "private", "public"
     );
 
     private static final String STARTER_OW = "main:\n  print: \"hello, ow!\"\n";
@@ -162,6 +164,9 @@ public class Ide extends JFrame {
 
         JMenu run = new JMenu("Run");
         run.add(menuItem("Run ▶  (interpret)", e -> doRun()));
+        run.add(menuItem("Run UI ▶  (web)", e -> doRunUi("web")));
+        run.add(menuItem("Run UI ▶  (native window)", e -> doRunUi("native")));
+        run.add(menuItem("Stop UI", e -> stopUi()));
         run.add(menuItem("Build .exe (LLVM/clang)", e -> doBuild()));
         run.add(menuItem("Clear Output", e -> console.setText("")));
         bar.add(run);
@@ -305,6 +310,9 @@ public class Ide extends JFrame {
         bar.add(button("Save",       e -> saveCurrent(false)));
         bar.addSeparator();
         bar.add(button("Run ▶",      e -> doRun()));
+        bar.add(button("UI Web ▶",    e -> doRunUi("web")));
+        bar.add(button("UI Native ▶", e -> doRunUi("native")));
+        bar.add(button("Stop UI",     e -> stopUi()));
         bar.add(button("Build .exe", e -> doBuild()));
         bar.addSeparator();
         bar.add(button("Git Status", e -> gitRunSeq(new String[]{"status"})));
@@ -649,11 +657,34 @@ public class Ide extends JFrame {
     // run / build
     // ------------------------------------------------------------------
 
-    private void doRun() {
+    /** The interpreter backing the currently running UI, so the IDE can stop it. */
+    private volatile Interpreter activeUiInterp;
+
+    private void doRun() { runSource(false); }
+
+    private void doRunUi(String mode) {
+        stopUi(); // only one UI window at a time
+        System.setProperty("ow.ui.mode", mode); // honoured by ui_run (plain programs)
+        runSource(true);
+    }
+
+    private void stopUi() {
+        Interpreter i = activeUiInterp;
+        if (i != null) {
+            i.stopUi();
+            activeUiInterp = null;
+            appendConsole("[run-ui] stopped.\n");
+            setStatus("UI stopped");
+        }
+    }
+
+    private void runSource(boolean isUi) {
         EditorTab tab = currentTab();
         if (tab == null) return;
         console.setText("");
-        appendConsole("[run] interpreting " + (tab.file != null ? tab.file.getName() : "untitled") + "\n");
+        String name = (tab.file != null ? tab.file.getName() : "untitled");
+        appendConsole(isUi ? "[run-ui] launching UI for " + name + "\n"
+                           : "[run] interpreting " + name + "\n");
         String source = tab.editor.getText();
         new SwingWorker<Void, String>() {
             @Override protected Void doInBackground() {
@@ -666,7 +697,10 @@ public class Ide extends JFrame {
                     PipedInputStream pin = new PipedInputStream(pout, 1 << 16);
                     PrintStream ps = new PrintStream(pout, true, StandardCharsets.UTF_8);
 
-                    Thread t = new Thread(() -> new Interpreter(ps, Ide.this::showInputDialog).run(program), "ow-interp");
+                    Interpreter interp = new Interpreter(ps, Ide.this::showInputDialog);
+                    if (isUi) activeUiInterp = interp;
+
+                    Thread t = new Thread(() -> interp.run(program), "ow-interp");
                     t.start();
 
                     BufferedReader br = new BufferedReader(new InputStreamReader(pin, StandardCharsets.UTF_8));
@@ -689,8 +723,9 @@ public class Ide extends JFrame {
                 for (String c : chunks) appendConsole(c);
             }
             @Override protected void done() {
-                appendConsole("[run] finished.\n");
-                setStatus("Run finished");
+                if (isUi) activeUiInterp = null;
+                appendConsole(isUi ? "[run-ui] finished.\n" : "[run] finished.\n");
+                setStatus(isUi ? "UI finished" : "Run finished");
             }
         }.execute();
     }
