@@ -5,19 +5,22 @@ import java.util.*;
 public class Ast {
 
     public static class Program {
+        public final List<String> imports;
         public final List<FnDecl> functions;
         public final List<EnumDecl> enums;
         public final List<InterfaceDecl> interfaces;
         public final List<ClassDecl> classes;
         public final List<ModelDecl> models;
-        public final List<Stmt> mainBody;
+        public final List<Stmt> mainBody; // may be null in imported (non-entry) files
 
-        public Program(List<FnDecl> functions,
+        public Program(List<String> imports,
+                       List<FnDecl> functions,
                        List<EnumDecl> enums,
                        List<InterfaceDecl> interfaces,
                        List<ClassDecl> classes,
                        List<ModelDecl> models,
                        List<Stmt> mainBody) {
+            this.imports = imports;
             this.functions = functions;
             this.enums = enums;
             this.interfaces = interfaces;

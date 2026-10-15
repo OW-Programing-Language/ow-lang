@@ -51,10 +51,8 @@ public class Main {
     }
 
     private static void runFile(Path in) throws Exception {
-        String src = Files.readString(in);
-        Lexer lexer = new Lexer(src);
-        Parser parser = new Parser(lexer.lexAll());
-        new Interpreter(System.out).run(parser.parseProgram());
+        // Loader resolves `import "..."` across files, then merges them.
+        new Interpreter(System.out).run(Loader.load(in));
     }
 
     private static void requireFile(String[] args, String cmd) {
