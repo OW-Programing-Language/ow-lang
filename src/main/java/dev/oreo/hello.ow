@@ -1,0 +1,31 @@
+# Ow language demo — works in the IDE's "Run" button (interpreter)
+# and most of it also compiles via "Build .exe" (LLVM/clang).
+
+fn add(a, b):
+  return: a + b
+
+fn fact(n):
+  if: n <= 1
+    return: 1
+  else:
+    return: n * fact(n - 1)
+
+main:
+  set greeting: "hello, ow!"
+  print: greeting
+
+  set sum: add(3, 4)
+  print: sum
+
+  set x: 10
+  if: x > 5
+    print: "big number"
+  else:
+    print: "small number"
+
+  set i: 0
+  while: i < 5
+    print: i
+    set i: i + 1
+
+  print: fact(6)

@@ -1,0 +1,37 @@
+# Build output
+target/
+build/
+out/
+dist/
+staging/
+*.class
+
+# jpackage / installer image output
+/t/
+*.msi
+
+# Native build artifacts
+*.exe
+*.o
+*.obj
+
+# IDEs
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+.settings/
+.classpath
+.project
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs / temp
+*.log
+*.tmp
+
+# Local Claude Code state
+.claude/
