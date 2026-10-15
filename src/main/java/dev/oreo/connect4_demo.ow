@@ -1,0 +1,344 @@
+# Puissance 4 en Ow
+# Limite actuelle du langage : pas d'entree utilisateur, pas de tableaux.
+# Cette version montre donc une partie scriptée et detecte le gagnant.
+
+fn mark(v):
+  if: v == 0
+    return: "."
+  else:
+    if: v == 1
+      return: "X"
+    else:
+      return: "O"
+
+fn row(a, b, c, d, e, f, g):
+  return: mark(a) + " " + mark(b) + " " + mark(c) + " " + mark(d) + " " + mark(e) + " " + mark(f) + " " + mark(g)
+
+fn four(a, b, c, d):
+  if: a != 0
+    if: a == b
+      if: b == c
+        if: c == d
+          return: 1
+  return: 0
+
+fn player_name(v):
+  if: v == 1
+    return: "Joueur 1 (X)"
+  else:
+    if: v == 2
+      return: "Joueur 2 (O)"
+    else:
+      return: "Personne"
+
+main:
+  print: "=== Puissance 4 en Ow ==="
+  print: "Partie scriptée avec detection du gagnant"
+  print: ""
+
+  set r1c1: 0
+  set r1c2: 0
+  set r1c3: 0
+  set r1c4: 0
+  set r1c5: 0
+  set r1c6: 0
+  set r1c7: 0
+
+  set r2c1: 0
+  set r2c2: 0
+  set r2c3: 0
+  set r2c4: 0
+  set r2c5: 0
+  set r2c6: 0
+  set r2c7: 0
+
+  set r3c1: 0
+  set r3c2: 0
+  set r3c3: 0
+  set r3c4: 0
+  set r3c5: 0
+  set r3c6: 0
+  set r3c7: 0
+
+  set r4c1: 0
+  set r4c2: 0
+  set r4c3: 0
+  set r4c4: 0
+  set r4c5: 0
+  set r4c6: 0
+  set r4c7: 0
+
+  set r5c1: 0
+  set r5c2: 0
+  set r5c3: 0
+  set r5c4: 0
+  set r5c5: 0
+  set r5c6: 0
+  set r5c7: 0
+
+  set r6c1: 0
+  set r6c2: 0
+  set r6c3: 0
+  set r6c4: 0
+  set r6c5: 0
+  set r6c6: 0
+  set r6c7: 0
+
+  # Position finale de la partie scriptée.
+  # Le Joueur 1 gagne horizontalement sur la derniere ligne.
+  set r6c1: 1
+  set r6c2: 1
+  set r6c3: 1
+  set r6c4: 1
+  set r6c5: 2
+  set r6c6: 2
+
+  set r5c1: 2
+  set r5c2: 2
+  set r5c3: 2
+
+  print: "Colonnes: 1 2 3 4 5 6 7"
+  print: row(r1c1, r1c2, r1c3, r1c4, r1c5, r1c6, r1c7)
+  print: row(r2c1, r2c2, r2c3, r2c4, r2c5, r2c6, r2c7)
+  print: row(r3c1, r3c2, r3c3, r3c4, r3c5, r3c6, r3c7)
+  print: row(r4c1, r4c2, r4c3, r4c4, r4c5, r4c6, r4c7)
+  print: row(r5c1, r5c2, r5c3, r5c4, r5c5, r5c6, r5c7)
+  print: row(r6c1, r6c2, r6c3, r6c4, r6c5, r6c6, r6c7)
+  print: ""
+
+  set winner: 0
+
+  # Horizontales
+  if: winner == 0
+    if: four(r1c1, r1c2, r1c3, r1c4)
+      set winner: r1c1
+  if: winner == 0
+    if: four(r1c2, r1c3, r1c4, r1c5)
+      set winner: r1c2
+  if: winner == 0
+    if: four(r1c3, r1c4, r1c5, r1c6)
+      set winner: r1c3
+  if: winner == 0
+    if: four(r1c4, r1c5, r1c6, r1c7)
+      set winner: r1c4
+
+  if: winner == 0
+    if: four(r2c1, r2c2, r2c3, r2c4)
+      set winner: r2c1
+  if: winner == 0
+    if: four(r2c2, r2c3, r2c4, r2c5)
+      set winner: r2c2
+  if: winner == 0
+    if: four(r2c3, r2c4, r2c5, r2c6)
+      set winner: r2c3
+  if: winner == 0
+    if: four(r2c4, r2c5, r2c6, r2c7)
+      set winner: r2c4
+
+  if: winner == 0
+    if: four(r3c1, r3c2, r3c3, r3c4)
+      set winner: r3c1
+  if: winner == 0
+    if: four(r3c2, r3c3, r3c4, r3c5)
+      set winner: r3c2
+  if: winner == 0
+    if: four(r3c3, r3c4, r3c5, r3c6)
+      set winner: r3c3
+  if: winner == 0
+    if: four(r3c4, r3c5, r3c6, r3c7)
+      set winner: r3c4
+
+  if: winner == 0
+    if: four(r4c1, r4c2, r4c3, r4c4)
+      set winner: r4c1
+  if: winner == 0
+    if: four(r4c2, r4c3, r4c4, r4c5)
+      set winner: r4c2
+  if: winner == 0
+    if: four(r4c3, r4c4, r4c5, r4c6)
+      set winner: r4c3
+  if: winner == 0
+    if: four(r4c4, r4c5, r4c6, r4c7)
+      set winner: r4c4
+
+  if: winner == 0
+    if: four(r5c1, r5c2, r5c3, r5c4)
+      set winner: r5c1
+  if: winner == 0
+    if: four(r5c2, r5c3, r5c4, r5c5)
+      set winner: r5c2
+  if: winner == 0
+    if: four(r5c3, r5c4, r5c5, r5c6)
+      set winner: r5c3
+  if: winner == 0
+    if: four(r5c4, r5c5, r5c6, r5c7)
+      set winner: r5c4
+
+  if: winner == 0
+    if: four(r6c1, r6c2, r6c3, r6c4)
+      set winner: r6c1
+  if: winner == 0
+    if: four(r6c2, r6c3, r6c4, r6c5)
+      set winner: r6c2
+  if: winner == 0
+    if: four(r6c3, r6c4, r6c5, r6c6)
+      set winner: r6c3
+  if: winner == 0
+    if: four(r6c4, r6c5, r6c6, r6c7)
+      set winner: r6c4
+
+  # Verticales
+  if: winner == 0
+    if: four(r1c1, r2c1, r3c1, r4c1)
+      set winner: r1c1
+  if: winner == 0
+    if: four(r2c1, r3c1, r4c1, r5c1)
+      set winner: r2c1
+  if: winner == 0
+    if: four(r3c1, r4c1, r5c1, r6c1)
+      set winner: r3c1
+
+  if: winner == 0
+    if: four(r1c2, r2c2, r3c2, r4c2)
+      set winner: r1c2
+  if: winner == 0
+    if: four(r2c2, r3c2, r4c2, r5c2)
+      set winner: r2c2
+  if: winner == 0
+    if: four(r3c2, r4c2, r5c2, r6c2)
+      set winner: r3c2
+
+  if: winner == 0
+    if: four(r1c3, r2c3, r3c3, r4c3)
+      set winner: r1c3
+  if: winner == 0
+    if: four(r2c3, r3c3, r4c3, r5c3)
+      set winner: r2c3
+  if: winner == 0
+    if: four(r3c3, r4c3, r5c3, r6c3)
+      set winner: r3c3
+
+  if: winner == 0
+    if: four(r1c4, r2c4, r3c4, r4c4)
+      set winner: r1c4
+  if: winner == 0
+    if: four(r2c4, r3c4, r4c4, r5c4)
+      set winner: r2c4
+  if: winner == 0
+    if: four(r3c4, r4c4, r5c4, r6c4)
+      set winner: r3c4
+
+  if: winner == 0
+    if: four(r1c5, r2c5, r3c5, r4c5)
+      set winner: r1c5
+  if: winner == 0
+    if: four(r2c5, r3c5, r4c5, r5c5)
+      set winner: r2c5
+  if: winner == 0
+    if: four(r3c5, r4c5, r5c5, r6c5)
+      set winner: r3c5
+
+  if: winner == 0
+    if: four(r1c6, r2c6, r3c6, r4c6)
+      set winner: r1c6
+  if: winner == 0
+    if: four(r2c6, r3c6, r4c6, r5c6)
+      set winner: r2c6
+  if: winner == 0
+    if: four(r3c6, r4c6, r5c6, r6c6)
+      set winner: r3c6
+
+  if: winner == 0
+    if: four(r1c7, r2c7, r3c7, r4c7)
+      set winner: r1c7
+  if: winner == 0
+    if: four(r2c7, r3c7, r4c7, r5c7)
+      set winner: r2c7
+  if: winner == 0
+    if: four(r3c7, r4c7, r5c7, r6c7)
+      set winner: r3c7
+
+  # Diagonales descendantes
+  if: winner == 0
+    if: four(r1c1, r2c2, r3c3, r4c4)
+      set winner: r1c1
+  if: winner == 0
+    if: four(r1c2, r2c3, r3c4, r4c5)
+      set winner: r1c2
+  if: winner == 0
+    if: four(r1c3, r2c4, r3c5, r4c6)
+      set winner: r1c3
+  if: winner == 0
+    if: four(r1c4, r2c5, r3c6, r4c7)
+      set winner: r1c4
+
+  if: winner == 0
+    if: four(r2c1, r3c2, r4c3, r5c4)
+      set winner: r2c1
+  if: winner == 0
+    if: four(r2c2, r3c3, r4c4, r5c5)
+      set winner: r2c2
+  if: winner == 0
+    if: four(r2c3, r3c4, r4c5, r5c6)
+      set winner: r2c3
+  if: winner == 0
+    if: four(r2c4, r3c5, r4c6, r5c7)
+      set winner: r2c4
+
+  if: winner == 0
+    if: four(r3c1, r4c2, r5c3, r6c4)
+      set winner: r3c1
+  if: winner == 0
+    if: four(r3c2, r4c3, r5c4, r6c5)
+      set winner: r3c2
+  if: winner == 0
+    if: four(r3c3, r4c4, r5c5, r6c6)
+      set winner: r3c3
+  if: winner == 0
+    if: four(r3c4, r4c5, r5c6, r6c7)
+      set winner: r3c4
+
+  # Diagonales montantes
+  if: winner == 0
+    if: four(r4c1, r3c2, r2c3, r1c4)
+      set winner: r4c1
+  if: winner == 0
+    if: four(r4c2, r3c3, r2c4, r1c5)
+      set winner: r4c2
+  if: winner == 0
+    if: four(r4c3, r3c4, r2c5, r1c6)
+      set winner: r4c3
+  if: winner == 0
+    if: four(r4c4, r3c5, r2c6, r1c7)
+      set winner: r4c4
+
+  if: winner == 0
+    if: four(r5c1, r4c2, r3c3, r2c4)
+      set winner: r5c1
+  if: winner == 0
+    if: four(r5c2, r4c3, r3c4, r2c5)
+      set winner: r5c2
+  if: winner == 0
+    if: four(r5c3, r4c4, r3c5, r2c6)
+      set winner: r5c3
+  if: winner == 0
+    if: four(r5c4, r4c5, r3c6, r2c7)
+      set winner: r5c4
+
+  if: winner == 0
+    if: four(r6c1, r5c2, r4c3, r3c4)
+      set winner: r6c1
+  if: winner == 0
+    if: four(r6c2, r5c3, r4c4, r3c5)
+      set winner: r6c2
+  if: winner == 0
+    if: four(r6c3, r5c4, r4c5, r3c6)
+      set winner: r6c3
+  if: winner == 0
+    if: four(r6c4, r5c5, r4c6, r3c7)
+      set winner: r6c4
+
+  if: winner == 0
+    print: "Resultat: match nul"
+  else:
+    print: "Resultat: " + player_name(winner) + " gagne"
