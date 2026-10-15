@@ -1,0 +1,154 @@
+# Connect 4 — playable in the console (OwIDE "Run" or `owc --run`).
+# Showcases Ow's OOP: a Board class with encapsulated state, methods,
+# typed variables, switch/case and a real input loop.
+
+class Board:
+  field cells          # flat 1D array, rows*cols
+  field rows
+  field cols
+
+  fn new():
+    set this.rows: 6
+    set this.cols: 7
+    set this.cells: array(42, 0)
+
+  fn idx(r, c):
+    return: r * this.cols + c
+
+  fn get(r, c):
+    return: this.cells[this.idx(r, c)]
+
+  fn put(r, c, v):
+    set cells: this.cells          # arrays are references, so this mutates the field
+    set cells[this.idx(r, c)]: v
+
+  fn in_bounds(r, c):
+    if: r < 0
+      return: 0
+    if: r >= this.rows
+      return: 0
+    if: c < 0
+      return: 0
+    if: c >= this.cols
+      return: 0
+    return: 1
+
+  # Drop a piece into a column; returns the row it landed on, or 0-1 if full.
+  fn drop(col, player):
+    set r: this.rows - 1
+    while: r >= 0
+      if: this.get(r, col) == 0
+        call: this.put(r, col, player)
+        return: r
+      set r: r - 1
+    return: 0 - 1
+
+  fn line(r, c, dr, dc):
+    set v: this.get(r, c)
+    if: v == 0
+      return: 0
+    set k: 1
+    while: k < 4
+      set rr: r + dr * k
+      set cc: c + dc * k
+      if: this.in_bounds(rr, cc) == 0
+        return: 0
+      if: this.get(rr, cc) != v
+        return: 0
+      set k: k + 1
+    return: v
+
+  fn winner():
+    set r: 0
+    while: r < this.rows
+      set c: 0
+      while: c < this.cols
+        set w: this.line(r, c, 0, 1)
+        if: w != 0
+          return: w
+        set w: this.line(r, c, 1, 0)
+        if: w != 0
+          return: w
+        set w: this.line(r, c, 1, 1)
+        if: w != 0
+          return: w
+        set w: this.line(r, c, 1, 0 - 1)
+        if: w != 0
+          return: w
+        set c: c + 1
+      set r: r + 1
+    return: 0
+
+  fn is_full():
+    set c: 0
+    while: c < this.cols
+      if: this.get(0, c) == 0
+        return: 0
+      set c: c + 1
+    return: 1
+
+fn name(p):
+  if: p == 1
+    return: "Red"
+  else:
+    return: "Yellow"
+
+fn other(p):
+  if: p == 1
+    return: 2
+  else:
+    return: 1
+
+fn symbol(v):
+  switch: v
+    case 1:
+      return: "R"
+    case 2:
+      return: "Y"
+    default:
+      return: "."
+
+fn show(board):
+  print: " 1 2 3 4 5 6 7"
+  set r int: 0
+  while: r < 6
+    set line string: ""
+    set c int: 0
+    while: c < 7
+      set line: line + " " + symbol(board.get(r, c))
+      set c: c + 1
+    print: line
+    set r: r + 1
+
+main:
+  set board: new Board()
+  set player int: 1
+  set playing int: 1
+  print: "=== Connect 4 (Ow) ==="
+  print: "Enter a column 1-7 to drop a piece, or 0 to quit."
+  while: playing == 1
+    call: show(board)
+    set choice int: int(input(name(player) + " > "))
+    if: choice == 0
+      set playing: 0
+    else:
+      set col int: choice - 1
+      if: board.in_bounds(0, col) == 0
+        print: "Invalid column, pick 1-7."
+      else:
+        set landed int: board.drop(col, player)
+        if: landed == 0 - 1
+          print: "That column is full, try another."
+        else:
+          set w int: board.winner()
+          if: w != 0
+            call: show(board)
+            print: name(w) + " wins! 🎉"
+            set playing: 0
+          else:
+            if: board.is_full() == 1
+              call: show(board)
+              print: "It's a draw!"
+              set playing: 0
+            else:
+              set player: other(player)
