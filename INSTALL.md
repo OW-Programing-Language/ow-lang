@@ -1,11 +1,25 @@
 # Installing Ow
 
-Ow runs on the JVM, so installing it is like installing a JDK: unpack it and put
-its `bin` on your `PATH`. After that, `ow` works from any terminal.
+## Option A — Native installer (recommended, no Java needed)
 
-## Prerequisite
+The Windows installer and native zip **bundle their own Java runtime**, so you
+don't need Java installed at all, and double-click just works.
 
-**Java 17 or newer** on your `PATH` (`java -version` should print 17+).
+- **`OwIDE-1.2.0.msi`** — run it: installs OwIDE with a Start-menu and desktop
+  shortcut, plus `ow.exe` / `OwIDE.exe` with a bundled runtime. Download from
+  [Releases](https://github.com/OW-Programing-Language/ow-lang/releases).
+- **`OwIDE-1.2.0-win-x64.zip`** — portable: unzip and run `OwIDE.exe`
+  (the IDE) or `ow.exe` (the CLI). Add the folder to `PATH` to use `ow` anywhere.
+
+> Double-clicking `OwIDE.jar` doing nothing? That's a Windows file-association
+> issue — an old Java (e.g. JRE 8) is registered for `.jar` and can't run it.
+> The native installer above avoids this entirely. (Or run `OwIDE.exe` / `ow ide`,
+> or re-associate `.jar` with a Java 17+ `javaw.exe`.)
+
+## Option B — JVM distribution (needs Java 17+)
+
+Ow also runs as a plain JVM app. Requires **Java 17 or newer** on your `PATH`
+(`java -version` should print 17+).
 
 ## Install (portable zip — recommended)
 
