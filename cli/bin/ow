@@ -1,0 +1,4 @@
+#!/bin/sh
+# Ow launcher (portable). Requires Java 17+ on PATH.
+DIR="$(cd "$(dirname "$0")" && pwd)"
+exec java -jar "$DIR/../lib/OwIDE.jar" "$@"

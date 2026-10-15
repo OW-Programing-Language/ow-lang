@@ -178,14 +178,29 @@ same `Board` class:
 | `src/main/java/dev/oreo/Ide.java` | OwIDE |
 | `src/main/java/dev/oreo/Main.java` | Main entry point |
 
-## Building & running
+## Installing (use `ow` everywhere)
+
+Install Ow like a JDK: download the portable zip from
+[Releases](../../releases), unzip it, and add its `bin/` to your `PATH`. Then:
+
+```sh
+ow version
+ow hello.ow                 # run a program
+ow run examples/api_demo.ow
+ow build hello.ow           # native .exe (needs LLVM/clang or Zig)
+ow ide                      # launch OwIDE
+```
+
+Full instructions (Windows / macOS / Linux): [INSTALL.md](INSTALL.md).
+
+## Building from source
 
 Requires JDK 17+ and Maven.
 
 ```sh
 mvn clean package            # builds target/OwIDE.jar
 java -jar target/OwIDE.jar               # launches OwIDE
-java -cp target/classes dev.oreo.Main --run examples/connect4_ui.ow   # run a program
+java -jar target/OwIDE.jar run examples/connect4_ui.ow   # run a program
 ```
 
 The interpreter (`--run` / OwIDE "Run") supports the full language including OOP
