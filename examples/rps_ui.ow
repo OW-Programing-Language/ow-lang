@@ -1,0 +1,42 @@
+# Rock · Paper · Scissors — a clickable minigame in Ow.
+# Click a move; the computer picks randomly. Runs in both UI backends.
+
+fn name_of(m):
+  switch: m
+    case 0:
+      return: "Rock"
+    case 1:
+      return: "Paper"
+    default:
+      return: "Scissors"
+
+fn render():
+  return: ui_col([ui_heading("Rock · Paper · Scissors"), ui_text(result), ui_text("You " + score_you + "  —  " + score_cpu + " CPU"), ui_row([ui_button("Rock", "play", 0), ui_button("Paper", "play", 1), ui_button("Scissors", "play", 2)]), ui_button("Reset", "reset")])
+
+fn play(you):
+  set cpu int: rand(3)
+  # (you - cpu + 3) mod 3 == 1  means you win; == 0 tie; == 2 lose
+  set d int: mod(you - cpu + 3, 3)
+  set head string: "You: " + name_of(you) + "   CPU: " + name_of(cpu) + "  —  "
+  switch: d
+    case 0:
+      set result: head + "Tie!"
+    case 1:
+      set result: head + "You win! 🎉"
+      set score_you: score_you + 1
+    default:
+      set result: head + "You lose 😢"
+      set score_cpu: score_cpu + 1
+  return: 0
+
+fn reset():
+  set score_you: 0
+  set score_cpu: 0
+  set result: "Make your move!"
+  return: 0
+
+main:
+  set score_you int: 0
+  set score_cpu int: 0
+  set result string: "Make your move!"
+  call: ui_run("render", "Rock Paper Scissors — Ow")

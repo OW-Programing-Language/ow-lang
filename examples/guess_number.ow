@@ -1,0 +1,24 @@
+# Guess the Number — a console minigame in Ow.
+# The computer picks a secret 1-100; you guess until you get it.
+
+main:
+  set secret int: rand(100) + 1
+  set tries int: 0
+  set playing int: 1
+  print: "=== Guess the Number (1-100) ==="
+  print: "Type a guess, or 0 to give up."
+  while: playing == 1
+    set guess int: int(input("Your guess > "))
+    if: guess == 0
+      print: "The number was " + secret + ". Bye!"
+      set playing: 0
+    else:
+      set tries: tries + 1
+      if: guess < secret
+        print: "Higher ⬆"
+      else:
+        if: guess > secret
+          print: "Lower ⬇"
+        else:
+          print: "Correct! 🎉 You got it in " + tries + " tries."
+          set playing: 0
