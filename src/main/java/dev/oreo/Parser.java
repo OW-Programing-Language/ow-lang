@@ -16,13 +16,17 @@ public class Parser {
         List<Ast.InterfaceDecl> interfaces = new ArrayList<>();
         List<Ast.ClassDecl> classes = new ArrayList<>();
         List<Ast.ModelDecl> models = new ArrayList<>();
+        List<String> imports = new ArrayList<>();
         List<Ast.Stmt> mainBody = null;
 
         consumeNewlines();
         while (!check(Type.EOF)) {
             if (check(Type.NEWLINE)) { p++; continue; }
 
-            if (matchIdent("fn")) {
+            if (matchIdent("import")) {
+                imports.add(expect(Type.STRING).text);
+                if (check(Type.NEWLINE)) p++;
+            } else if (matchIdent("fn")) {
                 fns.add(parseFnDecl());
             } else if (matchIdent("enum")) {
                 enums.add(parseEnum());
@@ -36,14 +40,15 @@ public class Parser {
                 if (mainBody != null) throw err("Duplicate 'main' block");
                 mainBody = parseBlockHeaderless();
             } else {
-                throw err("Expected 'fn', 'enum', 'interface', 'class', 'model' or 'main' at top level, got "
+                throw err("Expected 'import', 'fn', 'enum', 'interface', 'class', 'model' or 'main' at top level, got "
                         + peek().type + (peek().type == Type.IDENT ? "(" + peek().text + ")" : ""));
             }
             consumeNewlines();
         }
 
-        if (mainBody == null) throw err("Program is missing a 'main:' block");
-        return new Ast.Program(fns, enums, interfaces, classes, models, mainBody);
+        // 'main' is required for the entry file; imported files may omit it.
+        // That check is enforced at run time (Interpreter.run).
+        return new Ast.Program(imports, fns, enums, interfaces, classes, models, mainBody);
     }
 
     private Ast.FnDecl parseFnDecl() {

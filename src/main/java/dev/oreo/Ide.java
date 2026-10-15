@@ -36,7 +36,7 @@ public class Ide extends JFrame {
             "main", "set", "print", "if", "else", "while", "fn", "return", "call", "true", "false",
             "switch", "case", "default", "enum", "interface", "class", "field", "new", "this",
             "private", "public", "model", "save", "find", "delete", "where", "route", "respond",
-            "serve"
+            "serve", "import"
     );
 
     private static final String STARTER_OW = "main:\n  print: \"hello, ow!\"\n";
@@ -690,9 +690,10 @@ public class Ide extends JFrame {
         new SwingWorker<Void, String>() {
             @Override protected Void doInBackground() {
                 try {
-                    Lexer lexer = new Lexer(source);
-                    List<Lexer.Token> tokens = lexer.lexAll();
-                    Ast.Program program = new Parser(tokens).parseProgram();
+                    java.nio.file.Path baseDir = (tab.file != null)
+                            ? tab.file.getAbsoluteFile().getParentFile().toPath()
+                            : (projectRoot != null ? projectRoot.toPath() : java.nio.file.Path.of("."));
+                    Ast.Program program = Loader.loadSource(source, baseDir);
 
                     PipedOutputStream pout = new PipedOutputStream();
                     PipedInputStream pin = new PipedInputStream(pout, 1 << 16);

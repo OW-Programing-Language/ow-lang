@@ -118,6 +118,9 @@ public class Interpreter {
             db.put(m.name, new ArrayList<>());
         }
         if (!models.isEmpty()) loadDb();
+        if (program.mainBody == null) {
+            throw new RuntimeException("Program is missing a 'main:' block");
+        }
         try {
             execBlock(program.mainBody, globals);
         } finally {
@@ -130,8 +133,22 @@ public class Interpreter {
         if (ui != null) ui.shutdown();
     }
 
-    /** Public entry used by the UI runtime to invoke an Ow function by name. */
+    /**
+     * Public entry used by the UI/web runtimes to invoke an Ow handler by name.
+     * A dotted name like "game.move" dispatches to the method `move` on the global
+     * object `game`, so UI handlers can target methods, not just free functions.
+     */
     public Object callFunction(String name, List<Object> args) {
+        int dot = name.indexOf('.');
+        if (dot > 0) {
+            String base = name.substring(0, dot);
+            String method = name.substring(dot + 1);
+            Object target = globals.get(base);
+            if (target instanceof OwObject obj) {
+                return invokeMethod(obj, method, args, true);
+            }
+            throw new RuntimeException("Handler '" + name + "': '" + base + "' is not an object");
+        }
         Ast.FnDecl fn = functions.get(name);
         if (fn == null) throw new RuntimeException("Unknown function: " + name);
         return invokeFunction(fn, args);

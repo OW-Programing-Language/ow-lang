@@ -39,6 +39,12 @@ indentation + `key: value` YAML aesthetic.
 - **Inheritance & polymorphism** — `class Loud(Named):` overrides methods; calls
   dispatch dynamically on the object's actual class. Interfaces give a shared type.
 - **`to_string()`** — define it on a class and `print:` uses it automatically.
+- **Imports (multi-file projects)** — `import "Board.ow"` merges another file's
+  classes/functions/models (resolved relative to the importing file). Put one
+  class per file; the entry file holds `main`.
+- **Method event handlers** — UI/web handlers can target a method on a global
+  object via a dotted name, e.g. `ui_button("X", "game.move", i)` or
+  `ui_run("game.view", ...)` — so UI apps can be fully object-oriented.
 - **Arrays** — literals `[1, 2, 3]`, `array(n, fill)`, indexing, `len(...)`.
 - **Records / maps** — literals `{name: "Ada", age: 36}`, field access `rec.name`.
 - **Booleans** — `true` / `false`.
