@@ -36,6 +36,13 @@ public class Interpreter {
     /** A record / map value: {key: value, ...}, also the row type for the built-in DB. */
     public static final class OwRecord extends LinkedHashMap<String, Object> {}
 
+    /** An explicit HTTP response with a status code (from the `response(...)` builtin). */
+    public static final class OwResponse {
+        public final int status;
+        public final Object body;
+        OwResponse(int status, Object body) { this.status = status; this.body = body; }
+    }
+
     public static final class OwObject {
         public final Ast.ClassDecl cls;
         public final Map<String, Object> fields = new HashMap<>();
@@ -57,6 +64,8 @@ public class Interpreter {
     private boolean dbLoaded = false;
 
     private UiHost ui; // lazily created (web or native)
+    private WebRuntime web; // lazily created
+    private final ThreadLocal<OwRecord> currentRequest = new ThreadLocal<>();
     private final java.util.Random random = new java.util.Random();
 
     public Interpreter(PrintStream out) {
@@ -131,6 +140,26 @@ public class Interpreter {
     private static class ReturnSignal extends RuntimeException {
         final Object value;
         ReturnSignal(Object value) { super(null, null, false, false); this.value = value; }
+    }
+
+    private static class ResponseSignal extends RuntimeException {
+        final Object value;
+        ResponseSignal(Object value) { super(null, null, false, false); this.value = value; }
+    }
+
+    /** Runs a route's inline handler body with `req` bound; returns the responded value (or null). */
+    public Object runRouteHandler(List<Ast.Stmt> body, OwRecord req) {
+        Map<String, Object> env = new HashMap<>();
+        env.put("req", req);
+        currentRequest.set(req);
+        try {
+            execBlock(body, env);
+            return null;
+        } catch (ResponseSignal rs) {
+            return rs.value;
+        } finally {
+            currentRequest.remove();
+        }
     }
 
     private void execBlock(List<Ast.Stmt> body, Map<String, Object> env) {
@@ -213,6 +242,19 @@ public class Interpreter {
         if (s instanceof Ast.DeleteStmt del) {
             deleteRows(del, env);
             return;
+        }
+        if (s instanceof Ast.RouteStmt route) {
+            if (web == null) web = new WebRuntime(this, out);
+            web.register(route.spec, route.body);
+            return;
+        }
+        if (s instanceof Ast.ServeStmt serve) {
+            if (web == null) web = new WebRuntime(this, out);
+            web.serve(toInt(evalExpr(serve.port, env)));
+            return;
+        }
+        if (s instanceof Ast.RespondStmt resp) {
+            throw new ResponseSignal(evalExpr(resp.value, env));
         }
         if (s instanceof Ast.ReturnStmt r) {
             throw new ReturnSignal(evalExpr(r.value, env));
@@ -521,7 +563,7 @@ public class Interpreter {
         if (del.where == null) {
             rows.clear();
         } else {
-            rows.removeIf(row -> truthy(evalExpr(del.where, new HashMap<>(row))));
+            rows.removeIf(row -> truthy(evalExpr(del.where, rowEnv(row, env))));
         }
         persist();
     }
@@ -530,11 +572,18 @@ public class Interpreter {
         List<OwRecord> rows = rowsOf(fe.model);
         List<Object> result = new ArrayList<>();
         for (OwRecord row : rows) {
-            if (fe.where == null || truthy(evalExpr(fe.where, new HashMap<>(row)))) {
+            if (fe.where == null || truthy(evalExpr(fe.where, rowEnv(row, env)))) {
                 result.add(row);
             }
         }
         return result;
+    }
+
+    /** Query evaluation scope: caller's locals, with the row's fields shadowing on top. */
+    private Map<String, Object> rowEnv(OwRecord row, Map<String, Object> callerEnv) {
+        Map<String, Object> e = new HashMap<>(callerEnv);
+        e.putAll(row);
+        return e;
     }
 
     private java.nio.file.Path dbPath() {
@@ -631,6 +680,7 @@ public class Interpreter {
 
     private static final Set<String> BUILTINS = new HashSet<>(Arrays.asList(
             "input", "int", "len", "array", "str", "mod", "rand", "time_ms",
+            "json", "json_parse", "param", "query", "body", "body_json", "response",
             "ui_text", "ui_heading", "ui_button", "ui_row", "ui_col",
             "ui_grid", "ui_disc", "ui_run", "ui_run_web", "ui_run_native", "ui_stop"
     ));
@@ -647,6 +697,14 @@ public class Interpreter {
             case "mod" -> builtinMod(call, env);
             case "rand" -> builtinRand(call, env);
             case "time_ms" -> { requireArgCount(call, 0); yield (int) (System.currentTimeMillis() % 1000000000L); }
+            case "json" -> { requireArgCount(call, 1); yield Json.write(evalExpr(call.args.get(0), env)); }
+            case "json_parse" -> { requireArgCount(call, 1); yield Json.parse(formatValue(evalExpr(call.args.get(0), env))); }
+            case "param" -> reqSub("params", str(call, 0, env));
+            case "query" -> reqSub("query", str(call, 0, env));
+            case "body" -> { requireArgCount(call, 0); yield reqField("body"); }
+            case "body_json" -> { requireArgCount(call, 0); yield Json.parse(String.valueOf(reqField("body"))); }
+            case "response" -> { requireArgCount(call, 2); yield new OwResponse(
+                    toInt(evalExpr(call.args.get(0), env)), evalExpr(call.args.get(1), env)); }
             case "ui_text" -> uiNode("text", "text", str(call, 0, env));
             case "ui_heading" -> uiNode("heading", "text", str(call, 0, env));
             case "ui_button" -> builtinUiButton(call, env);
@@ -707,6 +765,19 @@ public class Interpreter {
         List<Object> list = new ArrayList<>(size);
         for (int i = 0; i < size; i++) list.add(cloneValue(fill));
         return list;
+    }
+
+    private Object reqField(String name) {
+        OwRecord req = currentRequest.get();
+        if (req == null) throw new RuntimeException("request builtins can only be used inside a route handler");
+        return req.get(name);
+    }
+
+    private Object reqSub(String section, String key) {
+        OwRecord req = currentRequest.get();
+        if (req == null) throw new RuntimeException("request builtins can only be used inside a route handler");
+        Object sub = req.get(section);
+        return (sub instanceof OwRecord r) ? r.get(key) : null;
     }
 
     private Object builtinRand(Ast.CallExpr call, Map<String, Object> env) {

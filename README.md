@@ -80,6 +80,42 @@ Records are plain Ow values, so `row.field` reads work and `len(find Model)`
 counts rows. Data survives restarts — run a program twice and the table is
 still there. See [`examples/db_demo.ow`](examples/db_demo.ow).
 
+## Web backend
+
+Ow can serve HTTP directly — an embedded, dependency-free server with inline
+route handlers. Combined with the built-in database, a `model` becomes a REST
+API in a handful of lines.
+
+```yaml
+model Note:
+  title string
+  body string
+
+main:
+  route "GET /notes":
+    respond: find Note
+
+  route "GET /notes/:id":
+    set want int: int(param("id"))
+    respond: (find Note where id == want)[0]
+
+  route "POST /notes":
+    save Note: body_json()
+    respond: response(201, {created: true})
+
+  serve: 8080
+```
+
+- `route "METHOD /path/:param": <block>` — register a handler (method defaults to GET; `:param` captures path segments).
+- Inside a handler: `req` (record with `method`/`path`/`query`/`params`/`body`), plus `param(name)`, `query(name)`, `body()`, `body_json()`.
+- `respond: value` — a record/array becomes JSON, a string becomes text/HTML; `response(status, value)` sets a status code.
+- `serve: port` — start the server (blocks).
+- JSON helpers: `json(value)`, `json_parse(string)`.
+
+See [`examples/api_demo.ow`](examples/api_demo.ow). The **Night** web framework
+(https://github.com/OW-Programing-Language/night) builds higher-level ergonomics
+on top of these primitives.
+
 ## Modern GUIs
 
 Ow programs can open a **modern, clickable UI** and render it two ways from the
@@ -132,7 +168,8 @@ same `Board` class:
 | `src/main/java/dev/oreo/Parser.java` | Parser → AST |
 | `src/main/java/dev/oreo/Ast.java` | AST node definitions |
 | `src/main/java/dev/oreo/Interpreter.java` | Tree-walking interpreter (OOP, switch, DB, UI builtins) |
-| `src/main/java/dev/oreo/Json.java` | JSON reader/writer for database persistence |
+| `src/main/java/dev/oreo/Json.java` | JSON reader/writer (database + web) |
+| `src/main/java/dev/oreo/WebRuntime.java` | Embedded HTTP server (route/serve) |
 | `src/main/java/dev/oreo/UiHost.java` | Common interface for UI backends |
 | `src/main/java/dev/oreo/UiRuntime.java` | Embedded web UI server + renderer |
 | `src/main/java/dev/oreo/SwingUiRuntime.java` | Modern flat native (desktop) UI renderer |
