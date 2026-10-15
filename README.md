@@ -40,9 +40,45 @@ indentation + `key: value` YAML aesthetic.
   dispatch dynamically on the object's actual class. Interfaces give a shared type.
 - **`to_string()`** — define it on a class and `print:` uses it automatically.
 - **Arrays** — literals `[1, 2, 3]`, `array(n, fill)`, indexing, `len(...)`.
-- **Builtins** — `input()`, `int()`, `str()`, `len()`, `array()`, `mod()`.
+- **Records / maps** — literals `{name: "Ada", age: 36}`, field access `rec.name`.
+- **Booleans** — `true` / `false`.
+- **Builtins** — `input()`, `int()`, `str()`, `len()`, `array()`, `mod()`,
+  `rand(n)`, `time_ms()`.
 
 See [`examples/oop_demo.ow`](examples/oop_demo.ow) for a tour of all of the above.
+
+## Built-in database (tables)
+
+A `model` declaration **is a table** — a typed, auto-persisting collection of
+records. No SQL, no driver, no setup: declaring a model gives you storage, and
+rows are saved to `ow-data.json` automatically (override the path with the
+`OW_DB_PATH` env var or `ow.db.path` system property).
+
+```yaml
+model Task:
+  title string
+  done bool
+  priority int
+
+main:
+  save Task: {title: "Ship v1.0", done: true, priority: 1}
+  save Task: {title: "Write docs", done: false, priority: 2}
+
+  set open: find Task where done == false     # query, no SQL strings
+  print: find Task                            # all rows (each gets an auto `id`)
+  delete Task where done == true              # bulk delete
+```
+
+| Operation | Syntax |
+|---|---|
+| Insert | `save Model: {field: value, ...}` (auto-assigns `id`) |
+| Query all | `find Model` → array of records |
+| Query filtered | `find Model where <condition>` (fields used as bare names) |
+| Delete | `delete Model` / `delete Model where <condition>` |
+
+Records are plain Ow values, so `row.field` reads work and `len(find Model)`
+counts rows. Data survives restarts — run a program twice and the table is
+still there. See [`examples/db_demo.ow`](examples/db_demo.ow).
 
 ## Modern GUIs
 
@@ -95,7 +131,8 @@ same `Board` class:
 | `src/main/java/dev/oreo/Lexer.java` | Tokenizer |
 | `src/main/java/dev/oreo/Parser.java` | Parser → AST |
 | `src/main/java/dev/oreo/Ast.java` | AST node definitions |
-| `src/main/java/dev/oreo/Interpreter.java` | Tree-walking interpreter (OOP, switch, UI builtins) |
+| `src/main/java/dev/oreo/Interpreter.java` | Tree-walking interpreter (OOP, switch, DB, UI builtins) |
+| `src/main/java/dev/oreo/Json.java` | JSON reader/writer for database persistence |
 | `src/main/java/dev/oreo/UiHost.java` | Common interface for UI backends |
 | `src/main/java/dev/oreo/UiRuntime.java` | Embedded web UI server + renderer |
 | `src/main/java/dev/oreo/SwingUiRuntime.java` | Modern flat native (desktop) UI renderer |

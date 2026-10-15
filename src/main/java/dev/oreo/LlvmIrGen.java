@@ -216,6 +216,9 @@ public class LlvmIrGen {
         if (e instanceof Ast.StringLit s) {
             return new Value(emitStringLiteral(s.value), "i8*");
         }
+        if (e instanceof Ast.BoolLit b) {
+            return new Value(b.value ? "1" : "0", "i32");
+        }
         if (e instanceof Ast.ArrayLit) {
             throw new RuntimeException("LLVM backend: arrays are not supported yet");
         }

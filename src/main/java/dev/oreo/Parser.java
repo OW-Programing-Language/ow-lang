@@ -15,6 +15,7 @@ public class Parser {
         List<Ast.EnumDecl> enums = new ArrayList<>();
         List<Ast.InterfaceDecl> interfaces = new ArrayList<>();
         List<Ast.ClassDecl> classes = new ArrayList<>();
+        List<Ast.ModelDecl> models = new ArrayList<>();
         List<Ast.Stmt> mainBody = null;
 
         consumeNewlines();
@@ -29,18 +30,20 @@ public class Parser {
                 interfaces.add(parseInterface());
             } else if (matchIdent("class")) {
                 classes.add(parseClass());
+            } else if (matchIdent("model")) {
+                models.add(parseModel());
             } else if (matchIdent("main")) {
                 if (mainBody != null) throw err("Duplicate 'main' block");
                 mainBody = parseBlockHeaderless();
             } else {
-                throw err("Expected 'fn', 'enum', 'interface', 'class' or 'main' at top level, got "
+                throw err("Expected 'fn', 'enum', 'interface', 'class', 'model' or 'main' at top level, got "
                         + peek().type + (peek().type == Type.IDENT ? "(" + peek().text + ")" : ""));
             }
             consumeNewlines();
         }
 
         if (mainBody == null) throw err("Program is missing a 'main:' block");
-        return new Ast.Program(fns, enums, interfaces, classes, mainBody);
+        return new Ast.Program(fns, enums, interfaces, classes, models, mainBody);
     }
 
     private Ast.FnDecl parseFnDecl() {
@@ -157,6 +160,26 @@ public class Parser {
         return new Ast.MethodDecl(name, isPrivate, params, body);
     }
 
+    // model Name:
+    //   field_name [type]
+    private Ast.ModelDecl parseModel() {
+        String name = expect(Type.IDENT).text;
+        expect(Type.COLON);
+        expect(Type.NEWLINE);
+        expect(Type.INDENT);
+        List<Ast.FieldDecl> fields = new ArrayList<>();
+        while (!check(Type.DEDENT) && !check(Type.EOF)) {
+            if (check(Type.NEWLINE)) { p++; continue; }
+            String fname = expect(Type.IDENT).text;
+            String type = null;
+            if (check(Type.IDENT)) type = expect(Type.IDENT).text;
+            expect(Type.NEWLINE);
+            fields.add(new Ast.FieldDecl(fname, false, type, null));
+        }
+        expect(Type.DEDENT);
+        return new Ast.ModelDecl(name, fields);
+    }
+
     private boolean parseVisibility() {
         if (matchIdent("private")) return true;
         if (matchIdent("public")) return false;
@@ -216,7 +239,21 @@ public class Parser {
         if (matchIdent("switch")) {
             return parseSwitch();
         }
-        throw err("Expected statement (set/print/if/while/switch/return/call), got "
+        if (matchIdent("save")) {
+            String model = expect(Type.IDENT).text;
+            expect(Type.COLON);
+            Ast.Expr record = parseExpr();
+            expect(Type.NEWLINE);
+            return new Ast.SaveStmt(model, record);
+        }
+        if (matchIdent("delete")) {
+            String model = expect(Type.IDENT).text;
+            Ast.Expr where = null;
+            if (matchIdent("where")) where = parseExpr();
+            expect(Type.NEWLINE);
+            return new Ast.DeleteStmt(model, where);
+        }
+        throw err("Expected statement (set/print/if/while/switch/save/delete/return/call), got "
                 + peek().type + (peek().type == Type.IDENT ? "(" + peek().text + ")" : ""));
     }
 
@@ -433,11 +470,32 @@ public class Parser {
             expect(Type.RPAREN);
             return inner;
         }
+        if (match(Type.LBRACE)) {
+            List<String> keys = new ArrayList<>();
+            List<Ast.Expr> values = new ArrayList<>();
+            if (!check(Type.RBRACE)) {
+                do {
+                    keys.add(expect(Type.IDENT).text);
+                    expect(Type.COLON);
+                    values.add(parseExpr());
+                } while (match(Type.COMMA));
+            }
+            expect(Type.RBRACE);
+            return new Ast.MapLit(keys, values);
+        }
+        if (matchIdent("true"))  return new Ast.BoolLit(true);
+        if (matchIdent("false")) return new Ast.BoolLit(false);
         if (matchIdent("new")) {
             String className = expect(Type.IDENT).text;
             expect(Type.LPAREN);
             List<Ast.Expr> args = parseArgs();
             return new Ast.NewExpr(className, args);
+        }
+        if (matchIdent("find")) {
+            String model = expect(Type.IDENT).text;
+            Ast.Expr where = null;
+            if (matchIdent("where")) where = parseExpr();
+            return new Ast.FindExpr(model, where);
         }
         if (check(Type.IDENT)) {
             String name = expect(Type.IDENT).text;

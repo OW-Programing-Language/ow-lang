@@ -9,7 +9,7 @@ public class Lexer {
         COLON, COMMA, DOT, NEWLINE,
         INDENT, DEDENT,
         PLUS, MINUS, STAR, SLASH,
-        LPAREN, RPAREN, LBRACKET, RBRACKET,
+        LPAREN, RPAREN, LBRACKET, RBRACKET, LBRACE, RBRACE,
         EQ_EQ, NEQ, LT, GT, LE, GE,
         EOF
     }
@@ -110,6 +110,8 @@ public class Lexer {
                 case ')': out.add(new Token(Type.RPAREN, ")", lineNo)); p++; continue;
                 case '[': out.add(new Token(Type.LBRACKET, "[", lineNo)); p++; continue;
                 case ']': out.add(new Token(Type.RBRACKET, "]", lineNo)); p++; continue;
+                case '{': out.add(new Token(Type.LBRACE,   "{", lineNo)); p++; continue;
+                case '}': out.add(new Token(Type.RBRACE,   "}", lineNo)); p++; continue;
             }
 
             if (c == '=') {

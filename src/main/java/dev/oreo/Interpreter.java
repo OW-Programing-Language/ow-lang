@@ -33,6 +33,9 @@ public class Interpreter {
         @Override public String toString() { return variant; }
     }
 
+    /** A record / map value: {key: value, ...}, also the row type for the built-in DB. */
+    public static final class OwRecord extends LinkedHashMap<String, Object> {}
+
     public static final class OwObject {
         public final Ast.ClassDecl cls;
         public final Map<String, Object> fields = new HashMap<>();
@@ -47,6 +50,11 @@ public class Interpreter {
     private final Map<String, Ast.EnumDecl> enums = new HashMap<>();
     private final Map<String, Ast.InterfaceDecl> interfaces = new HashMap<>();
     private final Map<String, Object> globals = new HashMap<>();
+
+    // built-in database
+    private final Map<String, Ast.ModelDecl> models = new HashMap<>();
+    private final Map<String, List<OwRecord>> db = new LinkedHashMap<>();
+    private boolean dbLoaded = false;
 
     private UiHost ui; // lazily created (web or native)
     private final java.util.Random random = new java.util.Random();
@@ -95,6 +103,12 @@ public class Interpreter {
             if (classes.containsKey(c.name)) throw new RuntimeException("Duplicate class: " + c.name);
             classes.put(c.name, c);
         }
+        for (Ast.ModelDecl m : program.models) {
+            if (models.containsKey(m.name)) throw new RuntimeException("Duplicate model: " + m.name);
+            models.put(m.name, m);
+            db.put(m.name, new ArrayList<>());
+        }
+        if (!models.isEmpty()) loadDb();
         try {
             execBlock(program.mainBody, globals);
         } finally {
@@ -142,6 +156,10 @@ public class Interpreter {
         }
         if (s instanceof Ast.SetFieldStmt set) {
             Object target = evalExpr(set.target, env);
+            if (target instanceof OwRecord rec) {
+                rec.put(set.field, evalExpr(set.value, env));
+                return;
+            }
             if (!(target instanceof OwObject obj)) {
                 throw new RuntimeException("Cannot set field '" + set.field + "' on a non-object");
             }
@@ -188,6 +206,14 @@ public class Interpreter {
             if (sw.defaultBody != null) execBlock(sw.defaultBody, env);
             return;
         }
+        if (s instanceof Ast.SaveStmt save) {
+            saveRow(save, env);
+            return;
+        }
+        if (s instanceof Ast.DeleteStmt del) {
+            deleteRows(del, env);
+            return;
+        }
         if (s instanceof Ast.ReturnStmt r) {
             throw new ReturnSignal(evalExpr(r.value, env));
         }
@@ -220,10 +246,21 @@ public class Interpreter {
     private Object evalExpr(Ast.Expr e, Map<String, Object> env) {
         if (e instanceof Ast.IntLit i) return i.value;
         if (e instanceof Ast.StringLit s) return s.value;
+        if (e instanceof Ast.BoolLit b) return b.value;
         if (e instanceof Ast.ArrayLit a) {
             List<Object> values = new ArrayList<>(a.elements.size());
             for (Ast.Expr element : a.elements) values.add(evalExpr(element, env));
             return values;
+        }
+        if (e instanceof Ast.MapLit ml) {
+            OwRecord rec = new OwRecord();
+            for (int i = 0; i < ml.keys.size(); i++) {
+                rec.put(ml.keys.get(i), evalExpr(ml.values.get(i), env));
+            }
+            return rec;
+        }
+        if (e instanceof Ast.FindExpr fe) {
+            return find(fe, env);
         }
         if (e instanceof Ast.Var v) {
             if (!isDefined(v.name, env)) {
@@ -246,6 +283,9 @@ public class Interpreter {
                 return enumValue(tv.name, fa.field);
             }
             Object target = evalExpr(fa.target, env);
+            if (target instanceof OwRecord rec) {
+                return rec.get(fa.field);
+            }
             if (target instanceof OwObject obj) {
                 Ast.FieldDecl fd = findField(obj.cls, fa.field);
                 if (fd == null) {
@@ -432,6 +472,113 @@ public class Interpreter {
             for (String sup : c.supers) if (sup.equals(typeName)) return true;
         }
         return false;
+    }
+
+    // ---- built-in database ----
+
+    private List<OwRecord> rowsOf(String model) {
+        List<OwRecord> rows = db.get(model);
+        if (rows == null) throw new RuntimeException("Unknown model: " + model);
+        return rows;
+    }
+
+    private void saveRow(Ast.SaveStmt save, Map<String, Object> env) {
+        if (!models.containsKey(save.model)) throw new RuntimeException("Unknown model: " + save.model);
+        Object value = evalExpr(save.record, env);
+        if (!(value instanceof Map)) {
+            throw new RuntimeException("save " + save.model + ": expects a record like {field: value, ...}");
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> src = (Map<String, Object>) value;
+        OwRecord row = new OwRecord();
+        row.putAll(src);
+
+        // light type validation against the model's declared fields
+        Ast.ModelDecl md = models.get(save.model);
+        for (Ast.FieldDecl f : md.fields) {
+            if (f.typeName != null && row.containsKey(f.name) && row.get(f.name) != null) {
+                checkType(f.typeName, row.get(f.name), "field '" + f.name + "' of " + save.model);
+            }
+        }
+
+        List<OwRecord> rows = rowsOf(save.model);
+        if (!row.containsKey("id")) row.put("id", nextId(rows));
+        rows.add(row);
+        persist();
+    }
+
+    private int nextId(List<OwRecord> rows) {
+        int max = 0;
+        for (OwRecord r : rows) {
+            Object id = r.get("id");
+            if (id instanceof Integer i && i > max) max = i;
+        }
+        return max + 1;
+    }
+
+    private void deleteRows(Ast.DeleteStmt del, Map<String, Object> env) {
+        List<OwRecord> rows = rowsOf(del.model);
+        if (del.where == null) {
+            rows.clear();
+        } else {
+            rows.removeIf(row -> truthy(evalExpr(del.where, new HashMap<>(row))));
+        }
+        persist();
+    }
+
+    private Object find(Ast.FindExpr fe, Map<String, Object> env) {
+        List<OwRecord> rows = rowsOf(fe.model);
+        List<Object> result = new ArrayList<>();
+        for (OwRecord row : rows) {
+            if (fe.where == null || truthy(evalExpr(fe.where, new HashMap<>(row)))) {
+                result.add(row);
+            }
+        }
+        return result;
+    }
+
+    private java.nio.file.Path dbPath() {
+        String p = System.getProperty("ow.db.path");
+        if (p == null) p = System.getenv("OW_DB_PATH");
+        if (p == null) p = "ow-data.json";
+        return java.nio.file.Path.of(p);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void loadDb() {
+        if (dbLoaded) return;
+        dbLoaded = true;
+        java.nio.file.Path path = dbPath();
+        if (!java.nio.file.Files.exists(path)) return;
+        try {
+            String text = java.nio.file.Files.readString(path, StandardCharsets.UTF_8);
+            Object parsed = Json.parse(text);
+            if (parsed instanceof Map<?, ?> top) {
+                for (Map.Entry<?, ?> e : top.entrySet()) {
+                    String model = String.valueOf(e.getKey());
+                    if (!db.containsKey(model)) continue; // ignore models not declared this run
+                    if (e.getValue() instanceof List<?> list) {
+                        List<OwRecord> rows = db.get(model);
+                        rows.clear();
+                        for (Object o : list) if (o instanceof OwRecord r) rows.add(r);
+                    }
+                }
+            }
+        } catch (Exception ex) {
+            out.println("[db] could not load " + path + ": " + ex.getMessage());
+        }
+    }
+
+    private void persist() {
+        OwRecord top = new OwRecord();
+        for (Map.Entry<String, List<OwRecord>> e : db.entrySet()) {
+            top.put(e.getKey(), new ArrayList<Object>(e.getValue()));
+        }
+        try {
+            java.nio.file.Files.writeString(dbPath(), Json.write(top), StandardCharsets.UTF_8);
+        } catch (Exception ex) {
+            out.println("[db] could not save " + dbPath() + ": " + ex.getMessage());
+        }
     }
 
     // ---- type checking for typed vars/fields ----
@@ -743,6 +890,17 @@ public class Interpreter {
     }
 
     String formatValue(Object o) {
+        if (o instanceof OwRecord rec) {
+            StringBuilder sb = new StringBuilder("{");
+            boolean first = true;
+            for (Map.Entry<String, Object> e : rec.entrySet()) {
+                if (!first) sb.append(", ");
+                first = false;
+                sb.append(e.getKey()).append(": ").append(formatValue(e.getValue()));
+            }
+            sb.append("}");
+            return sb.toString();
+        }
         if (o instanceof List<?> list) {
             StringBuilder sb = new StringBuilder("[");
             for (int i = 0; i < list.size(); i++) {

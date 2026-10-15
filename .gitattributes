@@ -1,0 +1,6 @@
+# Keep Ow sources detectable by GitHub Linguist.
+# NOTE: this cannot define a new language (that needs a PR to github-linguist/
+# linguist — see linguist/SUBMISSION.md). Until Ow is registered, GitHub will
+# treat .ow files as unknown/other.
+*.ow linguist-detectable=true
+*.ow linguist-language=Ow

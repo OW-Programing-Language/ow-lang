@@ -1,0 +1,11 @@
+# Entry to add to github-linguist/linguist's lib/linguist/languages.yml
+# (insert in alphabetical order). The language_id MUST be unique — pick an
+# unused value when opening the PR (the maintainers can confirm one).
+Ow:
+  type: programming
+  color: "#5b6ee1"
+  extensions:
+    - ".ow"
+  tm_scope: source.ow
+  ace_mode: text
+  language_id: 1000001234   # PLACEHOLDER — replace with a unique unused id
