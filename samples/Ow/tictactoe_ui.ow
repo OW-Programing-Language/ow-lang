@@ -1,0 +1,122 @@
+# Tic-Tac-Toe — a small clickable minigame in Ow.
+# Runs in both UI backends: OwIDE "UI Web ▶" / "UI Native ▶",
+# or `ui_run` (web) / swap to ui_run_native to force a desktop window.
+
+class Board:
+  field cells          # flat array of 9 cells (0 = empty, 1 = X, 2 = O)
+
+  fn new():
+    set this.cells: array(9, 0)
+
+  fn get_at(i):
+    return: this.cells[i]
+
+  fn put_at(i, v):
+    set cells: this.cells
+    set cells[i]: v
+
+  fn three(a, b, c):
+    set va: this.get_at(a)
+    if: va == 0
+      return: 0
+    if: this.get_at(b) != va
+      return: 0
+    if: this.get_at(c) != va
+      return: 0
+    return: va
+
+  fn winner():
+    # rows
+    set w: this.three(0, 1, 2)
+    if: w != 0
+      return: w
+    set w: this.three(3, 4, 5)
+    if: w != 0
+      return: w
+    set w: this.three(6, 7, 8)
+    if: w != 0
+      return: w
+    # columns
+    set w: this.three(0, 3, 6)
+    if: w != 0
+      return: w
+    set w: this.three(1, 4, 7)
+    if: w != 0
+      return: w
+    set w: this.three(2, 5, 8)
+    if: w != 0
+      return: w
+    # diagonals
+    set w: this.three(0, 4, 8)
+    if: w != 0
+      return: w
+    set w: this.three(2, 4, 6)
+    if: w != 0
+      return: w
+    return: 0
+
+  fn is_full():
+    set i int: 0
+    while: i < 9
+      if: this.get_at(i) == 0
+        return: 0
+      set i: i + 1
+    return: 1
+
+fn mark(v):
+  switch: v
+    case 1:
+      return: "X"
+    case 2:
+      return: "O"
+    default:
+      return: "·"
+
+fn other(p):
+  if: p == 1
+    return: 2
+  else:
+    return: 1
+
+fn cell_buttons():
+  set btns: array(9, 0)
+  set i int: 0
+  while: i < 9
+    set btns[i]: ui_button(mark(board.get_at(i)), "on_cell", i)
+    set i: i + 1
+  return: btns
+
+fn render():
+  return: ui_col([ui_heading("Tic-Tac-Toe"), ui_text(status), ui_grid(3, cell_buttons()), ui_button("New game", "new_game")])
+
+fn on_cell(i):
+  if: winner_val != 0
+    return: 0
+  if: board.get_at(i) != 0
+    return: 0
+  call: board.put_at(i, player)
+  set w int: board.winner()
+  if: w != 0
+    set winner_val: w
+    set status: mark(w) + " wins! 🎉"
+  else:
+    if: board.is_full() == 1
+      set status: "It's a draw!"
+    else:
+      set player: other(player)
+      set status: mark(player) + "'s turn"
+  return: 0
+
+fn new_game():
+  set board: new Board()
+  set player: 1
+  set winner_val: 0
+  set status: "X's turn"
+  return: 0
+
+main:
+  set board: new Board()
+  set player int: 1
+  set winner_val int: 0
+  set status string: "X's turn — click a square"
+  call: ui_run("render", "Tic-Tac-Toe — Ow")
