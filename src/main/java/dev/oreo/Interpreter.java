@@ -544,8 +544,18 @@ public class Interpreter {
         }
 
         List<OwRecord> rows = rowsOf(save.model);
-        if (!row.containsKey("id")) row.put("id", nextId(rows));
-        rows.add(row);
+        if (row.containsKey("id")) {
+            // upsert: replace an existing row with the same id, else append
+            Object id = row.get("id");
+            int at = -1;
+            for (int i = 0; i < rows.size(); i++) {
+                if (valuesEqual(rows.get(i).get("id"), id)) { at = i; break; }
+            }
+            if (at >= 0) rows.set(at, row); else rows.add(row);
+        } else {
+            row.put("id", nextId(rows));
+            rows.add(row);
+        }
         persist();
     }
 
