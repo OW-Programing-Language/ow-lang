@@ -1,0 +1,49 @@
+# Built-in database demo — no SQL, no setup, no libraries.
+# Declaring a `model` gives you a typed, auto-persisting table. Rows are saved
+# to ow-data.json next to where you run this (override with OW_DB_PATH).
+
+model Task:
+  title string
+  done bool
+  priority int
+
+fn show_all():
+  set all: find Task
+  print: "— " + len(all) + " task(s) —"
+  set i int: 0
+  while: i < len(all)
+    set t: all[i]
+    set box string: "[ ]"
+    if: t.done == true
+      set box: "[x]"
+    print: "  #" + t.id + " " + box + " (" + t.priority + ") " + t.title
+    set i: i + 1
+
+main:
+  # start clean for the demo
+  delete Task
+
+  save Task: {title: "Write the Ow docs", done: false, priority: 2}
+  save Task: {title: "Ship v1.0", done: true, priority: 1}
+  save Task: {title: "Add a web framework", done: false, priority: 3}
+  save Task: {title: "Sleep", done: false, priority: 1}
+
+  print: "All tasks:"
+  call: show_all()
+
+  print: ""
+  print: "High priority (<= 1), still open:"
+  set urgent: find Task where priority <= 1
+  set i int: 0
+  while: i < len(urgent)
+    if: urgent[i].done == false
+      print: "  -> " + urgent[i].title
+    set i: i + 1
+
+  print: ""
+  print: "Removing finished tasks..."
+  delete Task where done == true
+  call: show_all()
+
+  print: ""
+  print: "Data persists in ow-data.json — run again and the table is still here."

@@ -1,0 +1,102 @@
+# OOP feature test
+
+enum Color:
+  Red
+  Green
+  Blue
+
+interface Shape:
+  fn area()
+  fn name()
+
+class Circle(Shape):
+  field private radius
+  field public tag
+
+  fn new(r):
+    set this.radius: r
+    set this.tag: "a circle"
+
+  fn area():
+    return: this.radius * this.radius * 3
+
+  fn name():
+    return: "circle"
+
+  fn to_string():
+    return: "Circle(r=" + this.radius + ")"
+
+class Square(Shape):
+  field private side
+
+  fn new(s):
+    set this.side: s
+
+  fn area():
+    return: this.side * this.side
+
+  fn name():
+    return: "square"
+
+# inheritance + method override (polymorphism)
+class Named:
+  field name
+
+  fn new(n):
+    set this.name: n
+
+  fn describe():
+    return: "I am " + this.name
+
+class Loud(Named):
+  fn describe():
+    return: "I AM " + this.name + "!!!"
+
+fn total_area(shapes):
+  set sum int: 0
+  set i int: 0
+  while: i < len(shapes)
+    set sum: sum + shapes[i].area()
+    set i: i + 1
+  return: sum
+
+main:
+  print: "== enums =="
+  set c: Color.Green
+  print: c
+  switch: c
+    case Color.Red:
+      print: "stop"
+    case Color.Green:
+      print: "go"
+    default:
+      print: "?"
+
+  print: "== polymorphism via interface =="
+  set shapes: [new Circle(2), new Square(3), new Circle(1)]
+  set i int: 0
+  while: i < len(shapes)
+    print: shapes[i].name() + " area=" + shapes[i].area()
+    set i: i + 1
+  print: "total area = " + total_area(shapes)
+
+  print: "== inheritance + override =="
+  set a: new Named("Ada")
+  set b: new Loud("Bob")
+  print: a.describe()
+  print: b.describe()
+
+  print: "== to_string + encapsulation =="
+  set circ: new Circle(5)
+  print: circ
+  print: "public tag: " + circ.tag
+
+  print: "== switch on int =="
+  set n int: 2
+  switch: n
+    case 1:
+      print: "one"
+    case 2, 3:
+      print: "two or three"
+    default:
+      print: "many"
