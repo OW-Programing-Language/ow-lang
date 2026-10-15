@@ -35,7 +35,8 @@ public class Ide extends JFrame {
     private static final Set<String> KEYWORDS = Set.of(
             "main", "set", "print", "if", "else", "while", "fn", "return", "call", "true", "false",
             "switch", "case", "default", "enum", "interface", "class", "field", "new", "this",
-            "private", "public"
+            "private", "public", "model", "save", "find", "delete", "where", "route", "respond",
+            "serve"
     );
 
     private static final String STARTER_OW = "main:\n  print: \"hello, ow!\"\n";
