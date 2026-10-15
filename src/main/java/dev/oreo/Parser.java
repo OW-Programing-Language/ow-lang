@@ -253,6 +253,23 @@ public class Parser {
             expect(Type.NEWLINE);
             return new Ast.DeleteStmt(model, where);
         }
+        if (matchIdent("route")) {
+            String spec = expect(Type.STRING).text;
+            List<Ast.Stmt> body = parseBlockHeaderless();
+            return new Ast.RouteStmt(spec, body);
+        }
+        if (matchIdent("respond")) {
+            expect(Type.COLON);
+            Ast.Expr value = parseExpr();
+            expect(Type.NEWLINE);
+            return new Ast.RespondStmt(value);
+        }
+        if (matchIdent("serve")) {
+            expect(Type.COLON);
+            Ast.Expr port = parseExpr();
+            expect(Type.NEWLINE);
+            return new Ast.ServeStmt(port);
+        }
         throw err("Expected statement (set/print/if/while/switch/save/delete/return/call), got "
                 + peek().type + (peek().type == Type.IDENT ? "(" + peek().text + ")" : ""));
     }

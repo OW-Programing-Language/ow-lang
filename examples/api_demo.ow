@@ -1,0 +1,32 @@
+# A REST API in Ow — built-in web server + built-in database, no libraries.
+# Run it, then:  curl localhost:8080/notes   /   curl -X POST ... etc.
+
+model Note:
+  title string
+  body string
+
+main:
+  route "GET /":
+    respond: "<h1>Notes API</h1><p>GET /notes, POST /notes, GET /notes/:id, DELETE /notes/:id</p>"
+
+  route "GET /notes":
+    respond: find Note
+
+  route "GET /notes/:id":
+    set want int: int(param("id"))
+    set rows: find Note where id == want
+    if: len(rows) == 0
+      respond: response(404, {error: "note not found", id: want})
+    respond: rows[0]
+
+  route "POST /notes":
+    set data: body_json()
+    save Note: data
+    respond: response(201, {created: true, count: len(find Note)})
+
+  route "DELETE /notes/:id":
+    set want int: int(param("id"))
+    delete Note where id == want
+    respond: {deleted: want, remaining: len(find Note)}
+
+  serve: 8080

@@ -216,6 +216,28 @@ public class Ast {
         }
     }
 
+    /** route "METHOD /path": <inline handler body> */
+    public static class RouteStmt implements Stmt {
+        public final String spec;
+        public final List<Stmt> body;
+        public RouteStmt(String spec, List<Stmt> body) {
+            this.spec = spec;
+            this.body = body;
+        }
+    }
+
+    /** respond: value  (sends an HTTP response from inside a route handler) */
+    public static class RespondStmt implements Stmt {
+        public final Expr value;
+        public RespondStmt(Expr value) { this.value = value; }
+    }
+
+    /** serve: port  (starts the web server and blocks) */
+    public static class ServeStmt implements Stmt {
+        public final Expr port;
+        public ServeStmt(Expr port) { this.port = port; }
+    }
+
     /** delete Model [where cond] */
     public static class DeleteStmt implements Stmt {
         public final String model;
