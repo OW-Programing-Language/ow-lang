@@ -49,6 +49,7 @@ public class Interpreter {
     private final Map<String, Object> globals = new HashMap<>();
 
     private UiHost ui; // lazily created (web or native)
+    private final java.util.Random random = new java.util.Random();
 
     public Interpreter(PrintStream out) {
         this(out, consoleInput(out));
@@ -482,7 +483,7 @@ public class Interpreter {
     // ---- builtins ----
 
     private static final Set<String> BUILTINS = new HashSet<>(Arrays.asList(
-            "input", "int", "len", "array", "str", "mod",
+            "input", "int", "len", "array", "str", "mod", "rand", "time_ms",
             "ui_text", "ui_heading", "ui_button", "ui_row", "ui_col",
             "ui_grid", "ui_disc", "ui_run", "ui_run_web", "ui_run_native", "ui_stop"
     ));
@@ -497,6 +498,8 @@ public class Interpreter {
             case "len" -> builtinLen(call, env);
             case "array" -> builtinArray(call, env);
             case "mod" -> builtinMod(call, env);
+            case "rand" -> builtinRand(call, env);
+            case "time_ms" -> { requireArgCount(call, 0); yield (int) (System.currentTimeMillis() % 1000000000L); }
             case "ui_text" -> uiNode("text", "text", str(call, 0, env));
             case "ui_heading" -> uiNode("heading", "text", str(call, 0, env));
             case "ui_button" -> builtinUiButton(call, env);
@@ -557,6 +560,13 @@ public class Interpreter {
         List<Object> list = new ArrayList<>(size);
         for (int i = 0; i < size; i++) list.add(cloneValue(fill));
         return list;
+    }
+
+    private Object builtinRand(Ast.CallExpr call, Map<String, Object> env) {
+        requireArgCount(call, 1);
+        int n = toInt(evalExpr(call.args.get(0), env));
+        if (n <= 0) throw new RuntimeException("rand(n) expects n > 0");
+        return random.nextInt(n);
     }
 
     private Object builtinMod(Ast.CallExpr call, Map<String, Object> env) {
