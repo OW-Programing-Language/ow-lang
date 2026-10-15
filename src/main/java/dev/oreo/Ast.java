@@ -9,18 +9,31 @@ public class Ast {
         public final List<EnumDecl> enums;
         public final List<InterfaceDecl> interfaces;
         public final List<ClassDecl> classes;
+        public final List<ModelDecl> models;
         public final List<Stmt> mainBody;
 
         public Program(List<FnDecl> functions,
                        List<EnumDecl> enums,
                        List<InterfaceDecl> interfaces,
                        List<ClassDecl> classes,
+                       List<ModelDecl> models,
                        List<Stmt> mainBody) {
             this.functions = functions;
             this.enums = enums;
             this.interfaces = interfaces;
             this.classes = classes;
+            this.models = models;
             this.mainBody = mainBody;
+        }
+    }
+
+    /** A persisted record type: model Name: with typed fields. */
+    public static class ModelDecl {
+        public final String name;
+        public final List<FieldDecl> fields;
+        public ModelDecl(String name, List<FieldDecl> fields) {
+            this.name = name;
+            this.fields = fields;
         }
     }
 
@@ -193,6 +206,26 @@ public class Ast {
         public ReturnStmt(Expr value) { this.value = value; }
     }
 
+    /** save Model: recordExpr */
+    public static class SaveStmt implements Stmt {
+        public final String model;
+        public final Expr record;
+        public SaveStmt(String model, Expr record) {
+            this.model = model;
+            this.record = record;
+        }
+    }
+
+    /** delete Model [where cond] */
+    public static class DeleteStmt implements Stmt {
+        public final String model;
+        public final Expr where; // may be null (delete all)
+        public DeleteStmt(String model, Expr where) {
+            this.model = model;
+            this.where = where;
+        }
+    }
+
     public static class CallStmt implements Stmt {
         public final Expr call; // CallExpr or MethodCall
         public CallStmt(Expr call) { this.call = call; }
@@ -212,9 +245,34 @@ public class Ast {
         public StringLit(String value) { this.value = value; }
     }
 
+    public static class BoolLit implements Expr {
+        public final boolean value;
+        public BoolLit(boolean value) { this.value = value; }
+    }
+
     public static class ArrayLit implements Expr {
         public final List<Expr> elements;
         public ArrayLit(List<Expr> elements) { this.elements = elements; }
+    }
+
+    /** { key: expr, key: expr } record/map literal (insertion-ordered). */
+    public static class MapLit implements Expr {
+        public final List<String> keys;
+        public final List<Expr> values;
+        public MapLit(List<String> keys, List<Expr> values) {
+            this.keys = keys;
+            this.values = values;
+        }
+    }
+
+    /** find Model [where cond] → array of records */
+    public static class FindExpr implements Expr {
+        public final String model;
+        public final Expr where; // may be null (all rows)
+        public FindExpr(String model, Expr where) {
+            this.model = model;
+            this.where = where;
+        }
     }
 
     public static class Var implements Expr {

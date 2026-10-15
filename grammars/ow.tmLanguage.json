@@ -1,0 +1,49 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Ow",
+  "scopeName": "source.ow",
+  "fileTypes": ["ow"],
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#constants" },
+    { "include": "#declarations" },
+    { "include": "#keywords" },
+    { "include": "#builtins" }
+  ],
+  "repository": {
+    "comments": {
+      "match": "#.*$",
+      "name": "comment.line.number-sign.ow"
+    },
+    "strings": {
+      "name": "string.quoted.double.ow",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        { "match": "\\\\.", "name": "constant.character.escape.ow" }
+      ]
+    },
+    "numbers": {
+      "match": "\\b[0-9]+\\b",
+      "name": "constant.numeric.ow"
+    },
+    "constants": {
+      "match": "\\b(true|false)\\b",
+      "name": "constant.language.ow"
+    },
+    "declarations": {
+      "match": "\\b(fn|class|interface|enum|model|field|main)\\b",
+      "name": "storage.type.ow"
+    },
+    "keywords": {
+      "match": "\\b(set|print|return|call|if|else|while|switch|case|default|save|find|delete|where|new|this|private|public)\\b",
+      "name": "keyword.control.ow"
+    },
+    "builtins": {
+      "match": "\\b(input|int|str|len|array|mod|rand|time_ms|ui_text|ui_heading|ui_button|ui_row|ui_col|ui_grid|ui_disc|ui_run|ui_run_web|ui_run_native|ui_stop)\\b",
+      "name": "support.function.builtin.ow"
+    }
+  }
+}
