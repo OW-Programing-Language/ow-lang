@@ -24,7 +24,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * tree built with the ui_* builtins. After every event the render function is
  * called again and the browser re-syncs.
  */
-public class UiRuntime {
+public class UiRuntime implements UiHost {
 
     private final Interpreter interp;
     private final PrintStream out;

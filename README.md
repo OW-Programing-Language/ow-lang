@@ -46,9 +46,16 @@ See [`examples/oop_demo.ow`](examples/oop_demo.ow) for a tour of all of the abov
 
 ## Modern GUIs
 
-Ow programs can open a **modern, clickable UI** rendered as a real web page
-(HTML/CSS/JS) in a window, backed by a tiny embedded HTTP server — no external
-dependencies, no dated-looking Swing widgets. You describe the UI as a widget
+Ow programs can open a **modern, clickable UI** and render it two ways from the
+**same** widget tree:
+
+- **Web** (`ui_run`) — a real HTML/CSS/JS page served by a tiny embedded HTTP
+  server and opened in your browser.
+- **Native** (`ui_run_native`) — a flat, modern desktop window (custom-painted
+  rounded buttons, antialiased discs, dark card) — deliberately *not* the dated
+  default Swing look.
+
+Both are pure-JDK (no external dependencies). You describe the UI as a widget
 tree and clicks call back into your Ow functions.
 
 ```yaml
@@ -65,8 +72,13 @@ main:
 ```
 
 UI builtins: `ui_heading`, `ui_text`, `ui_button(label, handler [, arg])`,
-`ui_row`, `ui_col`, `ui_grid(cols, children)`, `ui_disc(color)`, `ui_run`,
-`ui_stop`. Set `OW_UI_NO_BROWSER=1` to print the URL instead of auto-opening.
+`ui_row`, `ui_col`, `ui_grid(cols, children)`, `ui_disc(color)`, `ui_run` (web),
+`ui_run_web`, `ui_run_native`, `ui_stop`.
+
+In **OwIDE** the toolbar has **UI Web ▶**, **UI Native ▶** and **Stop UI**
+buttons — a plain `ui_run` program follows the button you pick (via the
+`ow.ui.mode` system property / `OW_UI_MODE` env var). Set `OW_UI_NO_BROWSER=1` to
+print the URL instead of auto-opening the browser for the web backend.
 
 ## Connect 4
 
@@ -84,7 +96,9 @@ same `Board` class:
 | `src/main/java/dev/oreo/Parser.java` | Parser → AST |
 | `src/main/java/dev/oreo/Ast.java` | AST node definitions |
 | `src/main/java/dev/oreo/Interpreter.java` | Tree-walking interpreter (OOP, switch, UI builtins) |
+| `src/main/java/dev/oreo/UiHost.java` | Common interface for UI backends |
 | `src/main/java/dev/oreo/UiRuntime.java` | Embedded web UI server + renderer |
+| `src/main/java/dev/oreo/SwingUiRuntime.java` | Modern flat native (desktop) UI renderer |
 | `src/main/java/dev/oreo/LlvmIrGen.java` | LLVM IR code generator (procedural subset) |
 | `src/main/java/dev/oreo/OwCompiler.java` | Native compiler entry point |
 | `src/main/java/dev/oreo/Ide.java` | OwIDE |

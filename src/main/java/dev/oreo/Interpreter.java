@@ -48,7 +48,7 @@ public class Interpreter {
     private final Map<String, Ast.InterfaceDecl> interfaces = new HashMap<>();
     private final Map<String, Object> globals = new HashMap<>();
 
-    private UiRuntime ui; // lazily created
+    private UiHost ui; // lazily created (web or native)
 
     public Interpreter(PrintStream out) {
         this(out, consoleInput(out));
@@ -99,6 +99,11 @@ public class Interpreter {
         } finally {
             if (ui != null) ui.shutdown();
         }
+    }
+
+    /** Stops a running UI (if any), releasing a blocked ui_run call. Safe to call from any thread. */
+    public void stopUi() {
+        if (ui != null) ui.shutdown();
     }
 
     /** Public entry used by the UI runtime to invoke an Ow function by name. */
@@ -479,7 +484,7 @@ public class Interpreter {
     private static final Set<String> BUILTINS = new HashSet<>(Arrays.asList(
             "input", "int", "len", "array", "str", "mod",
             "ui_text", "ui_heading", "ui_button", "ui_row", "ui_col",
-            "ui_grid", "ui_disc", "ui_run", "ui_stop"
+            "ui_grid", "ui_disc", "ui_run", "ui_run_web", "ui_run_native", "ui_stop"
     ));
 
     private static boolean isBuiltin(String name) { return BUILTINS.contains(name); }
@@ -499,7 +504,9 @@ public class Interpreter {
             case "ui_col" -> uiContainer("col", call, env);
             case "ui_grid" -> builtinUiGrid(call, env);
             case "ui_disc" -> uiNode("disc", "color", str(call, 0, env));
-            case "ui_run" -> builtinUiRun(call, env);
+            case "ui_run" -> builtinUiRun(call, env, null);
+            case "ui_run_web" -> builtinUiRun(call, env, "web");
+            case "ui_run_native" -> builtinUiRun(call, env, "native");
             case "ui_stop" -> { if (ui != null) ui.requestStop(); yield 0; }
             default -> throw new RuntimeException("Unknown builtin: " + call.name);
         };
@@ -606,15 +613,26 @@ public class Interpreter {
         return node;
     }
 
-    private Object builtinUiRun(Ast.CallExpr call, Map<String, Object> env) {
+    private Object builtinUiRun(Ast.CallExpr call, Map<String, Object> env, String forcedMode) {
         if (call.args.size() < 1 || call.args.size() > 2) {
-            throw new RuntimeException("ui_run expects (renderFn) or (renderFn, title)");
+            throw new RuntimeException(call.name + " expects (renderFn) or (renderFn, title)");
         }
         String renderFn = formatValue(evalExpr(call.args.get(0), env));
         String title = call.args.size() == 2 ? formatValue(evalExpr(call.args.get(1), env)) : "Ow App";
-        if (ui == null) ui = new UiRuntime(this, out);
+        if (ui == null) {
+            ui = resolveMode(forcedMode).equals("native")
+                    ? new SwingUiRuntime(this, out)
+                    : new UiRuntime(this, out);
+        }
         ui.run(renderFn, title);
         return 0;
+    }
+
+    private static String resolveMode(String forced) {
+        if (forced != null) return forced;
+        String mode = System.getProperty("ow.ui.mode");
+        if (mode == null) mode = System.getenv("OW_UI_MODE");
+        return (mode != null && mode.equalsIgnoreCase("native")) ? "native" : "web";
     }
 
     private static void requireArgCount(Ast.CallExpr call, int expected) {
