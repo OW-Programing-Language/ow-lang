@@ -66,13 +66,26 @@ public class WebRuntime {
         server.createContext("/", this::dispatch);
         server.setExecutor(Executors.newSingleThreadExecutor());
         server.start();
-        out.println("Ow web server listening on http://localhost:" + port + "  (" + routes.size() + " routes)");
+        String url = "http://localhost:" + port + "/";
+        out.println("Ow web server listening on " + url + "  (" + routes.size() + " routes)");
+        openBrowser(url);
         // Block forever; the process is the server's lifetime.
         try {
             Thread.currentThread().join();
         } catch (InterruptedException ignored) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    private void openBrowser(String url) {
+        // Set OW_NO_BROWSER (or OW_UI_NO_BROWSER) to suppress, e.g. on a server.
+        if (System.getenv("OW_NO_BROWSER") != null || System.getenv("OW_UI_NO_BROWSER") != null) return;
+        try {
+            if (java.awt.Desktop.isDesktopSupported()
+                    && java.awt.Desktop.getDesktop().isSupported(java.awt.Desktop.Action.BROWSE)) {
+                java.awt.Desktop.getDesktop().browse(java.net.URI.create(url));
+            }
+        } catch (Exception ignored) { /* headless / server: just leave the URL printed */ }
     }
 
     private void dispatch(HttpExchange ex) throws IOException {
