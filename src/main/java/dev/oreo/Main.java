@@ -5,7 +5,7 @@ import java.nio.file.Path;
 
 public class Main {
 
-    public static final String VERSION = "1.2.1";
+    public static final String VERSION = "1.2.2";
 
     public static void main(String[] args) throws Exception {
         if (args.length == 0) {
@@ -32,6 +32,11 @@ public class Main {
                 System.out.println("Built: " + out.toAbsolutePath());
             }
 
+            case "package", "exe" -> {
+                requireFile(args, "package");
+                packageApp(args);
+            }
+
             case "version", "--version", "-v" -> System.out.println("ow " + VERSION);
 
             case "help", "--help", "-h" -> printUsage();
@@ -55,6 +60,27 @@ public class Main {
         new Interpreter(System.out).run(Loader.load(in));
     }
 
+    private static void packageApp(String[] args) throws Exception {
+        Path entry = Path.of(args[1]);
+        String name = null, type = null, version = null;
+        Path out = null, icon = null;
+        for (int i = 2; i < args.length - 1; i++) {
+            switch (args[i]) {
+                case "--name" -> name = args[++i];
+                case "--type" -> type = args[++i];
+                case "--out" -> out = Path.of(args[++i]);
+                case "--icon" -> icon = Path.of(args[++i]);
+                case "--version" -> version = args[++i];
+                default -> { /* ignore unknown */ }
+            }
+        }
+        if (type != null && !type.equals("gui") && !type.equals("console") && !type.equals("web")) {
+            System.err.println("--type must be gui, console, or web");
+            System.exit(1);
+        }
+        Packager.build(entry, name, type, out, icon, version);
+    }
+
     private static void requireFile(String[] args, String cmd) {
         if (args.length < 2) {
             System.err.println("Usage: ow " + cmd + " <file.ow>");
@@ -69,7 +95,9 @@ public class Main {
                 Usage:
                   ow <file.ow>          Run a program (interpreter)
                   ow run <file.ow>      Run a program (interpreter)
-                  ow build <file> [out] Compile to a native .exe (needs LLVM/clang or Zig)
+                  ow build <file> [out] Compile to a native .exe (procedural subset; needs LLVM/Zig)
+                  ow package <file>     Bundle an app/game into a launchable .exe + installer
+                                        [--name N] [--type gui|console|web] [--out dir] [--icon x.ico]
                   ow ide                Launch OwIDE
                   ow version            Print the version
                   ow help               Show this help

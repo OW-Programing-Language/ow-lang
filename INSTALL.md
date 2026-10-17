@@ -52,11 +52,30 @@ Ow also runs as a plain JVM app. Requires **Java 17 or newer** on your `PATH`
 ```
 ow <file.ow>            run a program (interpreter)
 ow run <file.ow>        run a program
-ow build <file> [out]   compile to a native .exe (needs LLVM/clang or Zig)
+ow package <file>       bundle an app/game into a launchable .exe + installer
+ow build <file> [out]   compile to a native .exe (procedural subset; needs LLVM/Zig)
 ow ide                  launch OwIDE
 ow version
 ow help
 ```
+
+## Building a launchable app/game (`ow package`)
+
+Turn any Ow program — a game, a console tool, or a web backend — into a
+self-contained `.exe` (with its own bundled Java runtime, so end users need no
+Java):
+
+```sh
+ow package src/main.ow --name RockPaperScissors --type gui
+ow package src/main.ow --name NotesAPI          --type web
+ow package src/main.ow --name Tool              --type console
+```
+
+- `--type gui` opens a native window, `console` a terminal, `web` starts the
+  server and opens the browser.
+- Output goes to `dist/<Name>/<Name>.exe` (plus a `.msi` installer when
+  [WiX 3.14](https://github.com/wixtoolset/wix3/releases) is on your PATH).
+- Requires a **full JDK 17+** on the machine (jpackage ships with it).
 
 ## Alternatives
 
