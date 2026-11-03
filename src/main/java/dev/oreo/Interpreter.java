@@ -726,7 +726,9 @@ public class Interpreter {
             "ui_text", "ui_heading", "ui_button", "ui_row", "ui_col",
             "ui_grid", "ui_disc", "ui_run", "ui_run_web", "ui_run_native", "ui_stop",
             "audio_play", "audio_music", "audio_stop", "mic_level", "mic_transcribe",
-            "save", "load", "exists"
+            "save", "load", "exists",
+            "upper", "lower", "trim", "substr", "index_of", "contains",
+            "replace", "split", "char_at"
     ));
 
     private static boolean isBuiltin(String name) { return BUILTINS.contains(name); }
@@ -768,6 +770,15 @@ public class Interpreter {
             case "save" -> builtinSave(call, env);
             case "load" -> builtinLoad(call, env);
             case "exists" -> builtinExists(call, env);
+            case "upper" -> { requireArgCount(call, 1); yield str(call, 0, env).toUpperCase(); }
+            case "lower" -> { requireArgCount(call, 1); yield str(call, 0, env).toLowerCase(); }
+            case "trim" -> { requireArgCount(call, 1); yield str(call, 0, env).trim(); }
+            case "substr" -> builtinSubstr(call, env);
+            case "index_of" -> { requireArgCount(call, 2); yield str(call, 0, env).indexOf(str(call, 1, env)); }
+            case "contains" -> { requireArgCount(call, 2); yield str(call, 0, env).contains(str(call, 1, env)) ? 1 : 0; }
+            case "replace" -> { requireArgCount(call, 3); yield str(call, 0, env).replace(str(call, 1, env), str(call, 2, env)); }
+            case "split" -> builtinSplit(call, env);
+            case "char_at" -> builtinCharAt(call, env);
             default -> throw new RuntimeException("Unknown builtin: " + call.name);
         };
     }
@@ -882,6 +893,52 @@ public class Interpreter {
     private Object builtinExists(Ast.CallExpr call, Map<String, Object> env) {
         requireArgCount(call, 1);
         return mediaFile(str(call, 0, env)).isFile() ? 1 : 0;
+    }
+
+    // ---- string builtins ----
+
+    // substr(s, start, len): substring with clamped, exception-free bounds.
+    private Object builtinSubstr(Ast.CallExpr call, Map<String, Object> env) {
+        requireArgCount(call, 3);
+        String s = str(call, 0, env);
+        int start = toInt(evalExpr(call.args.get(1), env));
+        int len = toInt(evalExpr(call.args.get(2), env));
+        if (start < 0) start = 0;
+        if (start > s.length()) start = s.length();
+        if (len < 0) len = 0;
+        int end = start + len;
+        if (end > s.length()) end = s.length();
+        return s.substring(start, end);
+    }
+
+    // split(s, sep): split on a literal separator into an array of strings.
+    // Empty separator splits into individual characters. Empty fields are kept.
+    private Object builtinSplit(Ast.CallExpr call, Map<String, Object> env) {
+        requireArgCount(call, 2);
+        String s = str(call, 0, env);
+        String sep = str(call, 1, env);
+        List<Object> out = new ArrayList<>();
+        if (sep.isEmpty()) {
+            for (int i = 0; i < s.length(); i++) out.add(String.valueOf(s.charAt(i)));
+            return out;
+        }
+        int i = 0;
+        while (true) {
+            int j = s.indexOf(sep, i);
+            if (j < 0) { out.add(s.substring(i)); break; }
+            out.add(s.substring(i, j));
+            i = j + sep.length();
+        }
+        return out;
+    }
+
+    // char_at(s, i): the character at index i as a 1-char string, "" if out of range.
+    private Object builtinCharAt(Ast.CallExpr call, Map<String, Object> env) {
+        requireArgCount(call, 2);
+        String s = str(call, 0, env);
+        int i = toInt(evalExpr(call.args.get(1), env));
+        if (i < 0 || i >= s.length()) return "";
+        return String.valueOf(s.charAt(i));
     }
 
     // ---- audio & microphone builtins (pure JDK javax.sound.sampled) ----
