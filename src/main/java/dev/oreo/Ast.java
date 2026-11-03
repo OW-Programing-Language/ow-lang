@@ -271,6 +271,11 @@ public class Ast {
 
     public interface Expr {}
 
+    public static class FloatLit implements Expr {
+        public final double value;
+        public FloatLit(double value) { this.value = value; }
+    }
+
     public static class IntLit implements Expr {
         public final int value;
         public IntLit(int value) { this.value = value; }
