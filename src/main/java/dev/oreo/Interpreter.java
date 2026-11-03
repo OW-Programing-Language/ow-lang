@@ -729,7 +729,8 @@ public class Interpreter {
             "save", "load", "exists",
             "upper", "lower", "trim", "substr", "index_of", "contains",
             "replace", "split", "char_at",
-            "abs", "min", "max", "pow", "sqrt", "clamp"
+            "abs", "min", "max", "pow", "sqrt", "clamp",
+            "sleep", "now_ms"
     ));
 
     private static boolean isBuiltin(String name) { return BUILTINS.contains(name); }
@@ -786,6 +787,8 @@ public class Interpreter {
             case "pow" -> builtinPow(call, env);
             case "sqrt" -> builtinSqrt(call, env);
             case "clamp" -> builtinClamp(call, env);
+            case "sleep" -> builtinSleep(call, env);
+            case "now_ms" -> { requireArgCount(call, 0); yield (int) (System.currentTimeMillis() - startMillis); }
             default -> throw new RuntimeException("Unknown builtin: " + call.name);
         };
     }
@@ -981,6 +984,26 @@ public class Interpreter {
         if (n < lo) return lo;
         if (n > hi) return hi;
         return n;
+    }
+
+    // ---- timing builtins ----
+
+    /** Wall-clock millis at interpreter start; now_ms() counts from here. */
+    private final long startMillis = System.currentTimeMillis();
+
+    // sleep(ms): block for ms milliseconds (ms <= 0 is a no-op). Returns 0.
+    private Object builtinSleep(Ast.CallExpr call, Map<String, Object> env) {
+        requireArgCount(call, 1);
+        int ms = toInt(evalExpr(call.args.get(0), env));
+        if (ms > 0) {
+            try {
+                Thread.sleep(ms);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("sleep interrupted");
+            }
+        }
+        return 0;
     }
 
     // ---- audio & microphone builtins (pure JDK javax.sound.sampled) ----
