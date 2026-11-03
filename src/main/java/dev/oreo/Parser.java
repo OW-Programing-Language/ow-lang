@@ -485,6 +485,10 @@ public class Parser {
     }
 
     private Ast.Expr parsePrimary() {
+        if (check(Type.FLOAT)) {
+            double v = Double.parseDouble(expect(Type.FLOAT).text);
+            return new Ast.FloatLit(v);
+        }
         if (check(Type.INT)) {
             int v = Integer.parseInt(expect(Type.INT).text);
             return new Ast.IntLit(v);
