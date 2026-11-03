@@ -728,7 +728,8 @@ public class Interpreter {
             "audio_play", "audio_music", "audio_stop", "mic_level", "mic_transcribe",
             "save", "load", "exists",
             "upper", "lower", "trim", "substr", "index_of", "contains",
-            "replace", "split", "char_at"
+            "replace", "split", "char_at",
+            "abs", "min", "max", "pow", "sqrt", "clamp"
     ));
 
     private static boolean isBuiltin(String name) { return BUILTINS.contains(name); }
@@ -779,6 +780,12 @@ public class Interpreter {
             case "replace" -> { requireArgCount(call, 3); yield str(call, 0, env).replace(str(call, 1, env), str(call, 2, env)); }
             case "split" -> builtinSplit(call, env);
             case "char_at" -> builtinCharAt(call, env);
+            case "abs" -> { requireArgCount(call, 1); int n = toInt(evalExpr(call.args.get(0), env)); yield n < 0 ? -n : n; }
+            case "min" -> { requireArgCount(call, 2); int a = toInt(evalExpr(call.args.get(0), env)); int b = toInt(evalExpr(call.args.get(1), env)); yield a < b ? a : b; }
+            case "max" -> { requireArgCount(call, 2); int a = toInt(evalExpr(call.args.get(0), env)); int b = toInt(evalExpr(call.args.get(1), env)); yield a > b ? a : b; }
+            case "pow" -> builtinPow(call, env);
+            case "sqrt" -> builtinSqrt(call, env);
+            case "clamp" -> builtinClamp(call, env);
             default -> throw new RuntimeException("Unknown builtin: " + call.name);
         };
     }
@@ -939,6 +946,41 @@ public class Interpreter {
         int i = toInt(evalExpr(call.args.get(1), env));
         if (i < 0 || i >= s.length()) return "";
         return String.valueOf(s.charAt(i));
+    }
+
+    // ---- math builtins (integer semantics) ----
+
+    // pow(base, exp): integer base^exp for exp >= 0.
+    private Object builtinPow(Ast.CallExpr call, Map<String, Object> env) {
+        requireArgCount(call, 2);
+        int base = toInt(evalExpr(call.args.get(0), env));
+        int exp = toInt(evalExpr(call.args.get(1), env));
+        if (exp < 0) throw new RuntimeException("pow(base, exp) expects exp >= 0");
+        int r = 1;
+        for (int i = 0; i < exp; i++) r = r * base;
+        return r;
+    }
+
+    // sqrt(n): integer floor square root (largest r with r*r <= n), n >= 0.
+    private Object builtinSqrt(Ast.CallExpr call, Map<String, Object> env) {
+        requireArgCount(call, 1);
+        int n = toInt(evalExpr(call.args.get(0), env));
+        if (n < 0) throw new RuntimeException("sqrt(n) expects n >= 0");
+        int r = 0;
+        while ((r + 1) * (r + 1) <= n) r++;
+        return r;
+    }
+
+    // clamp(n, lo, hi): n constrained to [lo, hi].
+    private Object builtinClamp(Ast.CallExpr call, Map<String, Object> env) {
+        requireArgCount(call, 3);
+        int n = toInt(evalExpr(call.args.get(0), env));
+        int lo = toInt(evalExpr(call.args.get(1), env));
+        int hi = toInt(evalExpr(call.args.get(2), env));
+        if (lo > hi) throw new RuntimeException("clamp(n, lo, hi) expects lo <= hi");
+        if (n < lo) return lo;
+        if (n > hi) return hi;
+        return n;
     }
 
     // ---- audio & microphone builtins (pure JDK javax.sound.sampled) ----
