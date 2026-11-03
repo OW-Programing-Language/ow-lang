@@ -14,6 +14,8 @@ import javax.sound.sampled.Clip;
 import javax.sound.sampled.DataLine;
 import javax.sound.sampled.LineEvent;
 import javax.sound.sampled.TargetDataLine;
+import org.vosk.Model;
+import org.vosk.Recognizer;
 
 public class Interpreter {
 
@@ -718,7 +720,7 @@ public class Interpreter {
             "json", "json_parse", "param", "query", "body", "body_json", "response",
             "ui_text", "ui_heading", "ui_button", "ui_row", "ui_col",
             "ui_grid", "ui_disc", "ui_run", "ui_run_web", "ui_run_native", "ui_stop",
-            "audio_play", "audio_music", "audio_stop", "mic_level"
+            "audio_play", "audio_music", "audio_stop", "mic_level", "mic_transcribe"
     ));
 
     private static boolean isBuiltin(String name) { return BUILTINS.contains(name); }
@@ -756,6 +758,7 @@ public class Interpreter {
             case "audio_music" -> builtinAudioMusic(call, env);
             case "audio_stop" -> builtinAudioStop(call);
             case "mic_level" -> builtinMicLevel(call, env);
+            case "mic_transcribe" -> builtinMicTranscribe(call, env);
             default -> throw new RuntimeException("Unknown builtin: " + call.name);
         };
     }
@@ -925,6 +928,63 @@ public class Interpreter {
             throw e;
         } catch (Exception e) {
             throw new RuntimeException("mic_level: " + e.getMessage());
+        } finally {
+            if (line != null) { line.stop(); line.close(); }
+        }
+    }
+
+    /** Cache of loaded Vosk models, keyed by model directory path. */
+    private final Map<String, Model> voskModels = new HashMap<>();
+
+    private Model voskModel(String modelPath) {
+        return voskModels.computeIfAbsent(modelPath, p -> {
+            File dir = mediaFile(p);
+            if (!dir.isDirectory()) {
+                throw new RuntimeException("mic_transcribe: model not found at '" + p
+                        + "'. Download a Vosk model (https://alphacephei.com/vosk/models) and unzip it there.");
+            }
+            try {
+                return new Model(dir.getAbsolutePath());
+            } catch (Exception e) {
+                throw new RuntimeException("mic_transcribe: failed to load model '" + p + "': " + e.getMessage());
+            }
+        });
+    }
+
+    // mic_transcribe(model_path, ms): record from the default microphone for `ms`
+    // milliseconds and return the recognized speech as lowercased text, using the
+    // offline Vosk model in the directory `model_path`. Returns "" if nothing is
+    // recognized. Unlike mic_level (loudness), this turns speech into words.
+    private Object builtinMicTranscribe(Ast.CallExpr call, Map<String, Object> env) {
+        requireArgCount(call, 2);
+        String modelPath = str(call, 0, env);
+        int ms = toInt(evalExpr(call.args.get(1), env));
+        if (ms <= 0) throw new RuntimeException("mic_transcribe(model, ms) expects ms > 0");
+        Model model = voskModel(modelPath);
+        AudioFormat format = new AudioFormat(16000f, 16, 1, true, false); // 16kHz mono PCM, little-endian
+        DataLine.Info info = new DataLine.Info(TargetDataLine.class, format);
+        if (!AudioSystem.isLineSupported(info)) {
+            throw new RuntimeException("mic_transcribe: no microphone line available");
+        }
+        TargetDataLine line = null;
+        try (Recognizer recognizer = new Recognizer(model, 16000f)) {
+            line = (TargetDataLine) AudioSystem.getLine(info);
+            line.open(format);
+            line.start();
+            byte[] buf = new byte[4096];
+            long deadline = System.currentTimeMillis() + ms;
+            while (System.currentTimeMillis() < deadline) {
+                int n = line.read(buf, 0, buf.length);
+                if (n > 0) recognizer.acceptWaveForm(buf, n);
+            }
+            Object parsed = Json.parse(recognizer.getFinalResult());
+            String text = (parsed instanceof OwRecord r && r.get("text") != null)
+                    ? String.valueOf(r.get("text")) : "";
+            return text.trim().toLowerCase();
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("mic_transcribe: " + e.getMessage());
         } finally {
             if (line != null) { line.stop(); line.close(); }
         }

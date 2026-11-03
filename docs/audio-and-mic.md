@@ -39,18 +39,56 @@ main:
   print: "Heard you!"
 ```
 
-### Important: this is loudness, not speech recognition
+### `mic_level` is loudness, not words
 
 `mic_level` reports **how loud** the microphone input is, not **what was
-said**. It is enough for "speak/clap to continue" style mechanics, but it
-does **not** turn audio into words.
+said**. For turning speech into words, use `mic_transcribe` below.
 
-Real speech-to-text (e.g. for a read-aloud reading game) needs a
-transcription engine. The JDK has none, so that would be a separate,
-larger change: add an offline engine such as [Vosk](https://alphacephei.com/vosk/)
-(Java bindings + a language model) behind a new builtin like
-`mic_transcribe(ms)`. That introduces a dependency and a bundled model,
-so it is intentionally **out of scope** for this change.
+## Speech-to-text
+
+| Builtin | Args | Returns | Description |
+|---------|------|---------|-------------|
+| `mic_transcribe(model_path, ms)` | 2 (string, int) | string | Record from the default microphone for `ms` ms and return the recognized speech as **lowercased text** (`""` if nothing is recognized). |
+
+Powered by the offline [Vosk](https://alphacephei.com/vosk/) engine (added
+as a Maven dependency — it bundles the native libraries). Everything runs
+locally; no audio leaves the machine.
+
+```ow
+# Read-aloud: pass if the player says the target word.
+main:
+  print: "Say the word: APPLE"
+  set heard: mic_transcribe("models/vosk-en", 3000)
+  if: heard == "apple"
+    print: "Correct!"
+  else:
+    print: "I heard: " + heard
+```
+
+### You must provide a model
+
+The Vosk **engine** ships with this change, but language **models** do
+not — they are large (a small English model is ~40 MB) and must not live
+in the repo. Download one from
+<https://alphacephei.com/vosk/models>, unzip it, and pass the folder as
+`model_path` (absolute, or relative to the working directory). The model
+is loaded once and cached per path.
+
+### Packaging
+
+Adding Vosk means the runtime classpath needs the `vosk` + `jna` jars
+(and Vosk's bundled native libraries). This is handled by building
+`OwIDE.jar` as an **uber-jar** via the `maven-shade-plugin`: all
+dependencies — including `win32-x86-64/libvosk.dll`, `libvosk.so`,
+`libvosk.dylib` and JNA's `jnidispatch` natives — are shaded in.
+
+Because `ow package` bundles the single `OwIDE.jar` into its jpackage
+app-image (see `Packager.java`), the packaged `.exe`/installer gets
+Vosk automatically with no change to the packager. `java -jar
+OwIDE.jar` and `ow run` likewise have it on the classpath.
+
+> Still external, by design: the Vosk **model** (see above) — it is not
+> shaded into the jar and must be shipped/downloaded alongside the app.
 
 ## Implementation notes
 
@@ -62,7 +100,11 @@ so it is intentionally **out of scope** for this change.
 - `mic_level` opens a 16 kHz / 16-bit / mono `TargetDataLine`, reads for the
   requested duration, and returns `peak / 32767 * 100`. It throws a clear
   error when no microphone line is available.
-- Verified: `mvn compile` (BUILD SUCCESS) and runtime `ow run` of
-  `audio_play` / `audio_music` / `audio_stop` on a real audio device.
-  `mic_level` is compile-verified; it was not auto-run (it would open the
-  live microphone).
+- `mic_transcribe` feeds the same 16 kHz mono capture into a Vosk
+  `Recognizer`, then parses the engine's `{"text": "..."}` result with the
+  built-in `Json` reader. Models are cached per path in `voskModels`.
+- Verified: `mvn compile` (BUILD SUCCESS, including the Vosk dependency) and
+  runtime `ow run` of `audio_play` / `audio_music` / `audio_stop` on a real
+  audio device. `mic_level` and `mic_transcribe` are compile-verified only;
+  they were not auto-run (they open the live microphone, and `mic_transcribe`
+  also needs a downloaded model).
