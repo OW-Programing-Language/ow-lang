@@ -14,6 +14,17 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
+    <dependencies>
+        <!-- Offline speech-to-text engine (bundles native libs + JNA).
+             Used by the mic_transcribe(...) builtin. Requires a Vosk model
+             at runtime; see docs/audio-and-mic.md. -->
+        <dependency>
+            <groupId>com.alphacephei</groupId>
+            <artifactId>vosk</artifactId>
+            <version>0.3.45</version>
+        </dependency>
+    </dependencies>
+
     <build>
         <finalName>OwIDE</finalName>
         <plugins>
