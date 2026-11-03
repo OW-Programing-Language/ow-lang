@@ -1,11 +1,19 @@
 package dev.oreo;
 
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import javax.sound.sampled.AudioFormat;
+import javax.sound.sampled.AudioInputStream;
+import javax.sound.sampled.AudioSystem;
+import javax.sound.sampled.Clip;
+import javax.sound.sampled.DataLine;
+import javax.sound.sampled.LineEvent;
+import javax.sound.sampled.TargetDataLine;
 
 public class Interpreter {
 
@@ -709,7 +717,8 @@ public class Interpreter {
             "input", "int", "len", "array", "str", "mod", "rand", "time_ms",
             "json", "json_parse", "param", "query", "body", "body_json", "response",
             "ui_text", "ui_heading", "ui_button", "ui_row", "ui_col",
-            "ui_grid", "ui_disc", "ui_run", "ui_run_web", "ui_run_native", "ui_stop"
+            "ui_grid", "ui_disc", "ui_run", "ui_run_web", "ui_run_native", "ui_stop",
+            "audio_play", "audio_music", "audio_stop", "mic_level"
     ));
 
     private static boolean isBuiltin(String name) { return BUILTINS.contains(name); }
@@ -743,6 +752,10 @@ public class Interpreter {
             case "ui_run_web" -> builtinUiRun(call, env, "web");
             case "ui_run_native" -> builtinUiRun(call, env, "native");
             case "ui_stop" -> { if (ui != null) ui.requestStop(); yield 0; }
+            case "audio_play" -> builtinAudioPlay(call, env);
+            case "audio_music" -> builtinAudioMusic(call, env);
+            case "audio_stop" -> builtinAudioStop(call);
+            case "mic_level" -> builtinMicLevel(call, env);
             default -> throw new RuntimeException("Unknown builtin: " + call.name);
         };
     }
@@ -820,6 +833,101 @@ public class Interpreter {
         int b = toInt(evalExpr(call.args.get(1), env));
         if (b == 0) throw new RuntimeException("mod by zero");
         return a % b;
+    }
+
+    // ---- audio & microphone builtins (pure JDK javax.sound.sampled) ----
+
+    /** Background music clip, looped until audio_stop() or replaced. */
+    private Clip musicClip;
+
+    /** Resolve a possibly-relative media path against the process working dir. */
+    private File mediaFile(String path) {
+        File f = new File(path);
+        return f.isAbsolute() ? f : new File(System.getProperty("user.dir"), path);
+    }
+
+    private Clip openClip(String path) {
+        try {
+            AudioInputStream in = AudioSystem.getAudioInputStream(mediaFile(path));
+            Clip clip = AudioSystem.getClip();
+            clip.open(in);
+            return clip;
+        } catch (Exception e) {
+            throw new RuntimeException("audio: cannot open '" + path + "': " + e.getMessage());
+        }
+    }
+
+    // audio_play(path): play a sound once (fire-and-forget), freeing it when done.
+    private Object builtinAudioPlay(Ast.CallExpr call, Map<String, Object> env) {
+        requireArgCount(call, 1);
+        Clip clip = openClip(str(call, 0, env));
+        clip.addLineListener(ev -> { if (ev.getType() == LineEvent.Type.STOP) ev.getLine().close(); });
+        clip.start();
+        return 0;
+    }
+
+    // audio_music(path): loop as background music, replacing any current track.
+    private Object builtinAudioMusic(Ast.CallExpr call, Map<String, Object> env) {
+        requireArgCount(call, 1);
+        stopMusic();
+        Clip clip = openClip(str(call, 0, env));
+        clip.loop(Clip.LOOP_CONTINUOUSLY);
+        musicClip = clip;
+        return 0;
+    }
+
+    // audio_stop(): stop the background music started by audio_music.
+    private Object builtinAudioStop(Ast.CallExpr call) {
+        requireArgCount(call, 0);
+        stopMusic();
+        return 0;
+    }
+
+    private void stopMusic() {
+        if (musicClip != null) {
+            musicClip.stop();
+            musicClip.close();
+            musicClip = null;
+        }
+    }
+
+    // mic_level(ms): record from the default microphone for `ms` milliseconds and
+    // return the peak amplitude as an int 0..100. This is a raw loudness reading
+    // (enough for a "speak to continue" mechanic); it is NOT speech recognition —
+    // turning audio into words needs an external engine (see docs).
+    private Object builtinMicLevel(Ast.CallExpr call, Map<String, Object> env) {
+        requireArgCount(call, 1);
+        int ms = toInt(evalExpr(call.args.get(0), env));
+        if (ms <= 0) throw new RuntimeException("mic_level(ms) expects ms > 0");
+        AudioFormat format = new AudioFormat(16000f, 16, 1, true, false); // 16kHz mono PCM, little-endian
+        DataLine.Info info = new DataLine.Info(TargetDataLine.class, format);
+        if (!AudioSystem.isLineSupported(info)) {
+            throw new RuntimeException("mic_level: no microphone line available");
+        }
+        TargetDataLine line = null;
+        try {
+            line = (TargetDataLine) AudioSystem.getLine(info);
+            line.open(format);
+            line.start();
+            byte[] buf = new byte[4096];
+            long deadline = System.currentTimeMillis() + ms;
+            int peak = 0;
+            while (System.currentTimeMillis() < deadline) {
+                int n = line.read(buf, 0, buf.length);
+                for (int i = 0; i + 1 < n; i += 2) {
+                    int sample = (short) ((buf[i] & 0xFF) | (buf[i + 1] << 8));
+                    int amp = Math.abs(sample);
+                    if (amp > peak) peak = amp;
+                }
+            }
+            return (int) Math.round(peak * 100.0 / 32767.0);
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("mic_level: " + e.getMessage());
+        } finally {
+            if (line != null) { line.stop(); line.close(); }
+        }
     }
 
     // ---- UI builtins → plain data nodes consumed by UiRuntime ----
