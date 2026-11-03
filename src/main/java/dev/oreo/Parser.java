@@ -244,6 +244,9 @@ public class Parser {
         if (matchIdent("switch")) {
             return parseSwitch();
         }
+        if (matchIdent("try")) {
+            return parseTry();
+        }
         if (matchIdent("save")) {
             String model = expect(Type.IDENT).text;
             expect(Type.COLON);
@@ -317,6 +320,17 @@ public class Parser {
         Ast.Expr value = parseExpr();
         expect(Type.NEWLINE);
         return new Ast.SetStmt(name, typeName, value);
+    }
+
+    // try: <block> catch <name>: <block>
+    private Ast.Stmt parseTry() {
+        List<Ast.Stmt> tryBody = parseBlockHeaderless();
+        if (!matchIdent("catch")) {
+            throw err("'try:' must be followed by 'catch <name>:'");
+        }
+        String name = expect(Type.IDENT).text;
+        List<Ast.Stmt> catchBody = parseBlockHeaderless();
+        return new Ast.TryStmt(tryBody, name, catchBody);
     }
 
     private Ast.IfStmt parseIf() {

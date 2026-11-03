@@ -184,6 +184,17 @@ public class Ast {
         }
     }
 
+    public static class TryStmt implements Stmt {
+        public final List<Stmt> tryBody;
+        public final String catchName;
+        public final List<Stmt> catchBody;
+        public TryStmt(List<Stmt> tryBody, String catchName, List<Stmt> catchBody) {
+            this.tryBody = tryBody;
+            this.catchName = catchName;
+            this.catchBody = catchBody;
+        }
+    }
+
     public static class CaseClause {
         public final List<Expr> values; // one or more matched values
         public final List<Stmt> body;
