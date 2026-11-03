@@ -297,8 +297,11 @@ public class Interpreter {
 
     private void assign(String name, Object value, Map<String, Object> env) {
         if (env == globals) { globals.put(name, value); return; }
-        if (env.containsKey(name)) { env.put(name, value); return; }
-        if (globals.containsKey(name)) { globals.put(name, value); return; }
+        // A `set` inside a function/method targets the local scope: declare it
+        // there (or update it if already local). We must NOT fall through to a
+        // same-named global, or a callee's local would clobber the caller's
+        // variable (e.g. a loop counter named `i`), since top-level `main` runs
+        // with env == globals. Reads still see globals via resolve().
         env.put(name, value);
     }
 
