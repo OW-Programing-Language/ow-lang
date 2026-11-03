@@ -6,6 +6,8 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 import javax.sound.sampled.AudioFormat;
 import javax.sound.sampled.AudioInputStream;
@@ -723,7 +725,8 @@ public class Interpreter {
             "json", "json_parse", "param", "query", "body", "body_json", "response",
             "ui_text", "ui_heading", "ui_button", "ui_row", "ui_col",
             "ui_grid", "ui_disc", "ui_run", "ui_run_web", "ui_run_native", "ui_stop",
-            "audio_play", "audio_music", "audio_stop", "mic_level", "mic_transcribe"
+            "audio_play", "audio_music", "audio_stop", "mic_level", "mic_transcribe",
+            "save", "load", "exists"
     ));
 
     private static boolean isBuiltin(String name) { return BUILTINS.contains(name); }
@@ -762,6 +765,9 @@ public class Interpreter {
             case "audio_stop" -> builtinAudioStop(call);
             case "mic_level" -> builtinMicLevel(call, env);
             case "mic_transcribe" -> builtinMicTranscribe(call, env);
+            case "save" -> builtinSave(call, env);
+            case "load" -> builtinLoad(call, env);
+            case "exists" -> builtinExists(call, env);
             default -> throw new RuntimeException("Unknown builtin: " + call.name);
         };
     }
@@ -839,6 +845,43 @@ public class Interpreter {
         int b = toInt(evalExpr(call.args.get(1), env));
         if (b == 0) throw new RuntimeException("mod by zero");
         return a % b;
+    }
+
+    // ---- file persistence builtins (JSON on disk) ----
+
+    // save(path, value): write `value` to `path` as JSON. Creates parent
+    // directories as needed. Returns 0.
+    private Object builtinSave(Ast.CallExpr call, Map<String, Object> env) {
+        requireArgCount(call, 2);
+        File file = mediaFile(str(call, 0, env));
+        Object value = evalExpr(call.args.get(1), env);
+        try {
+            File parent = file.getParentFile();
+            if (parent != null) Files.createDirectories(parent.toPath());
+            Files.writeString(file.toPath(), Json.write(value));
+        } catch (IOException e) {
+            throw new RuntimeException("save: cannot write '" + file + "': " + e.getMessage());
+        }
+        return 0;
+    }
+
+    // load(path): read `path` and return the parsed JSON value. Returns 0
+    // when the file does not exist (use exists(path) to distinguish).
+    private Object builtinLoad(Ast.CallExpr call, Map<String, Object> env) {
+        requireArgCount(call, 1);
+        File file = mediaFile(str(call, 0, env));
+        if (!file.isFile()) return 0;
+        try {
+            return Json.parse(Files.readString(file.toPath()));
+        } catch (IOException e) {
+            throw new RuntimeException("load: cannot read '" + file + "': " + e.getMessage());
+        }
+    }
+
+    // exists(path): 1 if the file exists, 0 otherwise.
+    private Object builtinExists(Ast.CallExpr call, Map<String, Object> env) {
+        requireArgCount(call, 1);
+        return mediaFile(str(call, 0, env)).isFile() ? 1 : 0;
     }
 
     // ---- audio & microphone builtins (pure JDK javax.sound.sampled) ----
