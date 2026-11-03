@@ -74,13 +74,21 @@ in the repo. Download one from
 `model_path` (absolute, or relative to the working directory). The model
 is loaded once and cached per path.
 
-### Packaging note
+### Packaging
 
-Adding Vosk means the runtime classpath now needs the `vosk` + `jna`
-jars. `ow run` through Maven and the IDE pick them up automatically, but
-the standalone `ow build` / `ow package` outputs (jpackage) must be
-updated to include these dependencies on the classpath. Tracked as a
-follow-up.
+Adding Vosk means the runtime classpath needs the `vosk` + `jna` jars
+(and Vosk's bundled native libraries). This is handled by building
+`OwIDE.jar` as an **uber-jar** via the `maven-shade-plugin`: all
+dependencies — including `win32-x86-64/libvosk.dll`, `libvosk.so`,
+`libvosk.dylib` and JNA's `jnidispatch` natives — are shaded in.
+
+Because `ow package` bundles the single `OwIDE.jar` into its jpackage
+app-image (see `Packager.java`), the packaged `.exe`/installer gets
+Vosk automatically with no change to the packager. `java -jar
+OwIDE.jar` and `ow run` likewise have it on the classpath.
+
+> Still external, by design: the Vosk **model** (see above) — it is not
+> shaded into the jar and must be shipped/downloaded alongside the app.
 
 ## Implementation notes
 
