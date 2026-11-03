@@ -5,7 +5,7 @@ import java.util.*;
 public class Lexer {
 
     public enum Type {
-        IDENT, INT, STRING,
+        IDENT, INT, FLOAT, STRING,
         COLON, COMMA, DOT, NEWLINE,
         INDENT, DEDENT,
         PLUS, MINUS, STAR, SLASH,
@@ -168,7 +168,16 @@ public class Lexer {
             if (isDigit(c)) {
                 int start = p;
                 while (p < line.length() && isDigit(line.charAt(p))) p++;
-                out.add(new Token(Type.INT, line.substring(start, p), lineNo));
+                // A float literal needs a '.' followed by at least one digit,
+                // so field access on an integer-ish token (never produced here)
+                // and trailing dots are left alone.
+                if (p + 1 < line.length() && line.charAt(p) == '.' && isDigit(line.charAt(p + 1))) {
+                    p++; // consume '.'
+                    while (p < line.length() && isDigit(line.charAt(p))) p++;
+                    out.add(new Token(Type.FLOAT, line.substring(start, p), lineNo));
+                } else {
+                    out.add(new Token(Type.INT, line.substring(start, p), lineNo));
+                }
                 continue;
             }
 

@@ -331,6 +331,7 @@ public class Interpreter {
 
     private Object evalExpr(Ast.Expr e, Map<String, Object> env) {
         if (e instanceof Ast.IntLit i) return i.value;
+        if (e instanceof Ast.FloatLit f) return f.value;
         if (e instanceof Ast.StringLit s) return s.value;
         if (e instanceof Ast.BoolLit b) return b.value;
         if (e instanceof Ast.ArrayLit a) {
@@ -402,6 +403,23 @@ public class Interpreter {
             Object r = evalExpr(b.right, env);
             if (b.op.equals("+") && (l instanceof String || r instanceof String)) {
                 return formatValue(l) + formatValue(r);
+            }
+            // If either side is a float, compute in floating point (so `/`
+            // gives a real quotient). Two integers keep integer arithmetic —
+            // including integer division — so existing programs are unchanged.
+            if (l instanceof Double || r instanceof Double) {
+                double ld = toDouble(l);
+                double rd = toDouble(r);
+                return switch (b.op) {
+                    case "+" -> ld + rd;
+                    case "-" -> ld - rd;
+                    case "*" -> ld * rd;
+                    case "/" -> {
+                        if (rd == 0.0) throw new RuntimeException("Division by zero");
+                        yield ld / rd;
+                    }
+                    default -> throw new RuntimeException("Unknown operator: " + b.op);
+                };
             }
             int li = toInt(l);
             int ri = toInt(r);
@@ -743,6 +761,7 @@ public class Interpreter {
             "upper", "lower", "trim", "substr", "index_of", "contains",
             "replace", "split", "char_at",
             "abs", "min", "max", "pow", "sqrt", "clamp",
+            "floor", "round", "ceil",
             "sleep", "now_ms",
             "assert"
     ));
@@ -803,6 +822,9 @@ public class Interpreter {
             case "pow" -> builtinPow(call, env);
             case "sqrt" -> builtinSqrt(call, env);
             case "clamp" -> builtinClamp(call, env);
+            case "floor" -> { requireArgCount(call, 1); yield (int) Math.floor(toDouble(evalExpr(call.args.get(0), env))); }
+            case "ceil" -> { requireArgCount(call, 1); yield (int) Math.ceil(toDouble(evalExpr(call.args.get(0), env))); }
+            case "round" -> { requireArgCount(call, 1); yield (int) Math.round(toDouble(evalExpr(call.args.get(0), env))); }
             case "sleep" -> builtinSleep(call, env);
             case "now_ms" -> { requireArgCount(call, 0); yield (int) (System.currentTimeMillis() - startMillis); }
             case "assert" -> builtinAssert(call, env);
@@ -832,10 +854,14 @@ public class Interpreter {
         requireArgCount(call, 1);
         Object value = evalExpr(call.args.get(0), env);
         if (value instanceof Integer i) return i;
+        if (value instanceof Double d) return (int) (double) d; // truncate toward zero
         if (value instanceof Boolean b) return b ? 1 : 0;
         if (value instanceof String s) {
             try { return Integer.parseInt(s.trim()); }
-            catch (NumberFormatException ex) { throw new RuntimeException("Cannot convert to int: " + s); }
+            catch (NumberFormatException ex) {
+                try { return (int) Double.parseDouble(s.trim()); }
+                catch (NumberFormatException ex2) { throw new RuntimeException("Cannot convert to int: " + s); }
+            }
         }
         throw new RuntimeException("int(...) expects a number, boolean, or string");
     }
@@ -1282,6 +1308,7 @@ public class Interpreter {
         if (l instanceof OwObject || r instanceof OwObject) return l == r;
         if (l instanceof List<?> || r instanceof List<?>) return Objects.equals(l, r);
         if (l instanceof String || r instanceof String) return formatValue(l).equals(formatValue(r));
+        if (l instanceof Double || r instanceof Double) return toDouble(l) == toDouble(r);
         return toInt(l) == toInt(r);
     }
 
@@ -1316,6 +1343,19 @@ public class Interpreter {
                 default -> throw new RuntimeException("Operator " + op + " not supported on strings");
             };
         }
+        if (l instanceof Double || r instanceof Double) {
+            double ld = toDouble(l);
+            double rd = toDouble(r);
+            return switch (op) {
+                case "==" -> ld == rd;
+                case "!=" -> ld != rd;
+                case "<"  -> ld <  rd;
+                case ">"  -> ld >  rd;
+                case "<=" -> ld <= rd;
+                case ">=" -> ld >= rd;
+                default -> throw new RuntimeException("Unknown comparison: " + op);
+            };
+        }
         int li = toInt(l);
         int ri = toInt(r);
         return switch (op) {
@@ -1342,6 +1382,20 @@ public class Interpreter {
         if (o instanceof Boolean b) return b ? 1 : 0;
         if (o instanceof OwEnumValue e) return e.ordinal;
         throw new RuntimeException("Expected number, got: " + o);
+    }
+
+    private static double toDouble(Object o) {
+        if (o instanceof Double d) return d;
+        if (o instanceof Integer i) return i;
+        if (o instanceof Boolean b) return b ? 1 : 0;
+        throw new RuntimeException("Expected number, got: " + o);
+    }
+
+    /** Render a double without a trailing ".0" when it is integer-valued. */
+    static String formatDouble(double d) {
+        if (Double.isNaN(d) || Double.isInfinite(d)) return String.valueOf(d);
+        if (d == Math.rint(d) && Math.abs(d) < 1e15) return String.valueOf((long) d);
+        return String.valueOf(d);
     }
 
     private static int toIndex(Object o) {
@@ -1393,6 +1447,7 @@ public class Interpreter {
             }
             return obj.toString();
         }
+        if (o instanceof Double d) return formatDouble(d);
         return String.valueOf(o);
     }
 }

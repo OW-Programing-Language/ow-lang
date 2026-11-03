@@ -25,6 +25,7 @@ public final class Json {
     private static void writeValue(Object v, StringBuilder sb) {
         if (v == null) { sb.append("null"); return; }
         if (v instanceof Integer || v instanceof Long) { sb.append(v); return; }
+        if (v instanceof Double d) { sb.append(Double.toString(d)); return; }
         if (v instanceof Boolean) { sb.append(v); return; }
         if (v instanceof Map) {
             sb.append('{');
@@ -161,8 +162,10 @@ public final class Json {
             if (peek() == '-') i++;
             while (i < s.length() && (Character.isDigit(s.charAt(i)) || s.charAt(i) == '.')) i++;
             String num = s.substring(start, i);
+            // Numbers with a decimal point are doubles; plain integers stay ints.
+            if (num.indexOf('.') >= 0) return Double.parseDouble(num);
             try { return Integer.parseInt(num); }
-            catch (NumberFormatException ex) { return (int) Double.parseDouble(num); }
+            catch (NumberFormatException ex) { return Double.parseDouble(num); }
         }
 
         Object bool() {
