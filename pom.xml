@@ -40,6 +40,34 @@
                     </archive>
                 </configuration>
             </plugin>
+
+            <!-- Build OwIDE.jar as an uber-jar so dependencies (vosk + its
+                 bundled JNA and native libs) travel with it. This is what makes
+                 `ow package` / `ow build` work: Packager bundles the single
+                 OwIDE.jar into the jpackage app-image, so the shaded jar puts
+                 vosk + jna on the runtime classpath with no change to Packager. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.6.0</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>dev.oreo.Main</mainClass>
+                                </transformer>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                            </transformers>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 </project>
