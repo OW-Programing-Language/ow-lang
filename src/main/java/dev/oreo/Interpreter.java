@@ -736,7 +736,8 @@ public class Interpreter {
             "input", "int", "len", "array", "str", "mod", "rand", "time_ms",
             "json", "json_parse", "param", "query", "body", "body_json", "response",
             "ui_text", "ui_heading", "ui_button", "ui_row", "ui_col",
-            "ui_grid", "ui_disc", "ui_run", "ui_run_web", "ui_run_native", "ui_stop",
+            "ui_grid", "ui_disc", "ui_image", "ui_input",
+            "ui_run", "ui_run_web", "ui_run_native", "ui_stop",
             "audio_play", "audio_music", "audio_stop", "mic_level", "mic_transcribe",
             "save", "load", "exists",
             "upper", "lower", "trim", "substr", "index_of", "contains",
@@ -773,6 +774,8 @@ public class Interpreter {
             case "ui_col" -> uiContainer("col", call, env);
             case "ui_grid" -> builtinUiGrid(call, env);
             case "ui_disc" -> uiNode("disc", "color", str(call, 0, env));
+            case "ui_image" -> { requireArgCount(call, 1); yield uiNode("image", "src", str(call, 0, env)); }
+            case "ui_input" -> builtinUiInput(call, env);
             case "ui_run" -> builtinUiRun(call, env, null);
             case "ui_run_web" -> builtinUiRun(call, env, "web");
             case "ui_run_native" -> builtinUiRun(call, env, "native");
@@ -1215,6 +1218,17 @@ public class Interpreter {
         node.put("type", "grid");
         node.put("cols", cols);
         node.put("children", children);
+        return node;
+    }
+
+    // ui_input(value, handler): a text field pre-filled with `value` that calls
+    // `handler` with the current text (as a string) when the user submits it.
+    private Map<String, Object> builtinUiInput(Ast.CallExpr call, Map<String, Object> env) {
+        requireArgCount(call, 2);
+        Map<String, Object> node = new LinkedHashMap<>();
+        node.put("type", "input");
+        node.put("value", formatValue(evalExpr(call.args.get(0), env)));
+        node.put("onInput", formatValue(evalExpr(call.args.get(1), env)));
         return node;
     }
 
