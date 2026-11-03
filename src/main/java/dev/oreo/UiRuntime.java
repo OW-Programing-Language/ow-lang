@@ -66,6 +66,7 @@ public class UiRuntime implements UiHost {
         server.createContext("/", this::handleRoot);
         server.createContext("/state", this::handleState);
         server.createContext("/event", this::handleEvent);
+        server.createContext("/asset", this::handleAsset);
         server.setExecutor(null);
         server.start();
 
@@ -128,9 +129,13 @@ public class UiRuntime implements UiHost {
         Event event = (id != null) ? events.get(id) : null;
         if (event != null) {
             try {
-                List<Object> args = event.hasArg
-                        ? Collections.singletonList(event.arg)
-                        : Collections.emptyList();
+                // An input field sends its current text as ?value=...; a button
+                // uses the arg captured at render time (if any).
+                String rawValue = param(query, "value");
+                List<Object> args;
+                if (rawValue != null) args = Collections.singletonList(rawValue);
+                else if (event.hasArg) args = Collections.singletonList(event.arg);
+                else args = Collections.emptyList();
                 interp.callFunction(event.handler, args);
             } catch (RuntimeException err) {
                 out.println("Ow UI handler error: " + err.getMessage());
@@ -143,6 +148,29 @@ public class UiRuntime implements UiHost {
         ex.getResponseHeaders().add("Content-Type", "application/json; charset=utf-8");
         ex.sendResponseHeaders(200, body.length);
         try (OutputStream os = ex.getResponseBody()) { os.write(body); }
+    }
+
+    // Serves an image file referenced by ui_image, resolved against the
+    // working directory. /asset?path=<relative-or-absolute>
+    private void handleAsset(HttpExchange ex) throws IOException {
+        String path = param(ex.getRequestURI().getRawQuery(), "path");
+        java.io.File f = (path == null) ? null : new java.io.File(path);
+        if (f != null && !f.isAbsolute()) f = new java.io.File(System.getProperty("user.dir"), path);
+        if (f == null || !f.isFile()) { ex.sendResponseHeaders(404, -1); ex.close(); return; }
+        byte[] body = java.nio.file.Files.readAllBytes(f.toPath());
+        ex.getResponseHeaders().add("Content-Type", contentType(f.getName()));
+        ex.sendResponseHeaders(200, body.length);
+        try (OutputStream os = ex.getResponseBody()) { os.write(body); }
+    }
+
+    private static String contentType(String name) {
+        String n = name.toLowerCase(Locale.ROOT);
+        if (n.endsWith(".png")) return "image/png";
+        if (n.endsWith(".jpg") || n.endsWith(".jpeg")) return "image/jpeg";
+        if (n.endsWith(".gif")) return "image/gif";
+        if (n.endsWith(".webp")) return "image/webp";
+        if (n.endsWith(".svg")) return "image/svg+xml";
+        return "application/octet-stream";
     }
 
     private static String param(String query, String key) {
@@ -179,16 +207,21 @@ public class UiRuntime implements UiHost {
             Map<String, Object> m = (Map<String, Object>) map;
             sb.append('{');
             boolean first = true;
-            // register button events and inject an id
+            // register button/input events and inject an id
             if ("button".equals(m.get("type"))) {
                 String id = "e" + idSeq.incrementAndGet();
                 boolean hasArg = m.containsKey("arg");
                 events.put(id, new Event(String.valueOf(m.get("onClick")), hasArg, m.get("arg")));
                 sb.append("\"id\":\"").append(id).append('"');
                 first = false;
+            } else if ("input".equals(m.get("type"))) {
+                String id = "e" + idSeq.incrementAndGet();
+                events.put(id, new Event(String.valueOf(m.get("onInput")), false, null));
+                sb.append("\"id\":\"").append(id).append('"');
+                first = false;
             }
             for (Map.Entry<String, Object> e : m.entrySet()) {
-                if (e.getKey().equals("onClick") || e.getKey().equals("arg")) continue;
+                if (e.getKey().equals("onClick") || e.getKey().equals("arg") || e.getKey().equals("onInput")) continue;
                 if (!first) sb.append(',');
                 first = false;
                 writeString(e.getKey(), sb);
@@ -280,6 +313,10 @@ public class UiRuntime implements UiHost {
                        box-shadow:inset 0 3px 8px rgba(0,0,0,.45);transition:background .25s ease, transform .25s ease;}
               .ow-disc.red{background:radial-gradient(circle at 35% 30%, #ff7a7a, var(--red));transform:scale(1.02);}
               .ow-disc.yellow{background:radial-gradient(circle at 35% 30%, #ffe08a, var(--yellow));transform:scale(1.02);}
+              .ow-image{max-width:100%;border-radius:12px;display:block;}
+              .ow-input{font:inherit;padding:10px 14px;border-radius:12px;border:1px solid var(--panel2);
+                        background:var(--panel2);color:var(--text);min-width:220px;outline:none;}
+              .ow-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(99,102,241,.25);}
             </style>
             </head>
             <body>
@@ -302,6 +339,16 @@ public class UiRuntime implements UiHost {
                   const d=document.createElement('div'); const c=(node.color||'').toLowerCase();
                   d.className='ow-disc'+(KNOWN[c]?(' '+c):''); if(!KNOWN[c]&&c) d.style.background=node.color; return d;
                 }
+                if(t === 'image'){
+                  const im=document.createElement('img'); im.className='ow-image';
+                  im.src='/asset?path='+encodeURIComponent(node.src); im.alt=node.src; return im;
+                }
+                if(t === 'input'){
+                  const inp=document.createElement('input'); inp.className='ow-input'; inp.type='text';
+                  inp.value=node.value||''; inp.placeholder='type and press Enter';
+                  inp.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); fire(node.id, inp.value); }});
+                  return inp;
+                }
                 if(t === 'row' || t === 'col'){
                   const d=document.createElement('div'); d.className = t==='row'?'ow-row':'ow-col';
                   (node.children||[]).forEach(ch=>d.appendChild(build(ch))); return d;
@@ -316,9 +363,11 @@ public class UiRuntime implements UiHost {
 
               function render(tree){ app.innerHTML=''; app.appendChild(build(tree)); }
 
-              async function fire(id){
+              async function fire(id, value){
                 if(!id) return;
-                try{ await fetch('/event?id='+encodeURIComponent(id), {method:'POST'}); }catch(e){}
+                let url = '/event?id='+encodeURIComponent(id);
+                if(value !== undefined) url += '&value='+encodeURIComponent(value);
+                try{ await fetch(url, {method:'POST'}); }catch(e){}
                 sync(true);
               }
               async function sync(force){

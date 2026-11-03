@@ -144,6 +144,10 @@ public class SwingUiRuntime implements UiHost {
                 return new RoundButton(m);
             case "disc":
                 return new Disc(str(m.get("color")));
+            case "image":
+                return imageComp(m);
+            case "input":
+                return new InputField(m);
             case "row":
                 return container(m, true);
             case "col":
@@ -201,6 +205,44 @@ public class SwingUiRuntime implements UiHost {
             out.println("Ow UI handler error: " + err.getMessage());
         }
         rerender();
+    }
+
+    private void fireInput(Map<String, Object> node, String value) {
+        String handler = str(node.get("onInput"));
+        try {
+            interp.callFunction(handler, java.util.Collections.singletonList(value));
+        } catch (RuntimeException err) {
+            out.println("Ow UI handler error: " + err.getMessage());
+        }
+        rerender();
+    }
+
+    private JComponent imageComp(Map<String, Object> m) {
+        String path = str(m.get("src"));
+        try {
+            java.io.File f = new java.io.File(path);
+            if (!f.isAbsolute()) f = new java.io.File(System.getProperty("user.dir"), path);
+            java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(f);
+            if (img == null) throw new RuntimeException("unreadable image");
+            JLabel l = new JLabel(new ImageIcon(img));
+            l.setAlignmentX(Component.CENTER_ALIGNMENT);
+            return l;
+        } catch (Exception e) {
+            JLabel l = new JLabel("[image: " + path + "]");
+            l.setForeground(MUTED);
+            l.setAlignmentX(Component.CENTER_ALIGNMENT);
+            return l;
+        }
+    }
+
+    private class InputField extends JTextField {
+        InputField(Map<String, Object> node) {
+            super(str(node.get("value")), 16);
+            setFont(font(Font.PLAIN, 15));
+            setMaximumSize(new Dimension(260, 38));
+            setAlignmentX(Component.CENTER_ALIGNMENT);
+            addActionListener(e -> fireInput(node, getText())); // fires on Enter
+        }
     }
 
     private static String str(Object o) { return o == null ? "" : String.valueOf(o); }
