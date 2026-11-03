@@ -730,7 +730,8 @@ public class Interpreter {
             "upper", "lower", "trim", "substr", "index_of", "contains",
             "replace", "split", "char_at",
             "abs", "min", "max", "pow", "sqrt", "clamp",
-            "sleep", "now_ms"
+            "sleep", "now_ms",
+            "assert"
     ));
 
     private static boolean isBuiltin(String name) { return BUILTINS.contains(name); }
@@ -789,6 +790,7 @@ public class Interpreter {
             case "clamp" -> builtinClamp(call, env);
             case "sleep" -> builtinSleep(call, env);
             case "now_ms" -> { requireArgCount(call, 0); yield (int) (System.currentTimeMillis() - startMillis); }
+            case "assert" -> builtinAssert(call, env);
             default -> throw new RuntimeException("Unknown builtin: " + call.name);
         };
     }
@@ -1004,6 +1006,20 @@ public class Interpreter {
             }
         }
         return 0;
+    }
+
+    // assert(cond) / assert(cond, message): pass (return 0) when cond is
+    // truthy; otherwise print "Assertion failed[: message]" to stderr and
+    // exit with a non-zero status so test runners/CI see the failure.
+    private Object builtinAssert(Ast.CallExpr call, Map<String, Object> env) {
+        if (call.args.isEmpty() || call.args.size() > 2) {
+            throw new RuntimeException("assert expects (cond) or (cond, message)");
+        }
+        if (truthy(evalExpr(call.args.get(0), env))) return 0;
+        String message = call.args.size() == 2 ? str(call, 1, env) : "";
+        System.err.println(message.isEmpty() ? "Assertion failed" : "Assertion failed: " + message);
+        System.exit(1);
+        return 0; // unreachable
     }
 
     // ---- audio & microphone builtins (pure JDK javax.sound.sampled) ----
