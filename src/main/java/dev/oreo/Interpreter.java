@@ -251,6 +251,18 @@ public class Interpreter {
             }
             return;
         }
+        if (s instanceof Ast.TryStmt t) {
+            try {
+                execBlock(t.tryBody, env);
+            } catch (ReturnSignal | ResponseSignal signal) {
+                throw signal; // control flow, not an error — must not be caught
+            } catch (RuntimeException ex) {
+                String msg = ex.getMessage();
+                assign(t.catchName, msg == null ? "" : msg, env);
+                execBlock(t.catchBody, env);
+            }
+            return;
+        }
         if (s instanceof Ast.SwitchStmt sw) {
             Object subject = evalExpr(sw.subject, env);
             for (Ast.CaseClause c : sw.cases) {
