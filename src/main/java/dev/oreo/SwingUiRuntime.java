@@ -222,9 +222,15 @@ public class SwingUiRuntime implements UiHost {
         try {
             java.io.File f = new java.io.File(path);
             if (!f.isAbsolute()) f = new java.io.File(System.getProperty("user.dir"), path);
-            java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(f);
-            if (img == null) throw new RuntimeException("unreadable image");
-            JLabel l = new JLabel(new ImageIcon(img));
+            // ImageIO.read freezes GIFs on frame one; ImageIcon keeps their animation.
+            ImageIcon icon = new ImageIcon(f.getAbsolutePath());
+            if (icon.getIconWidth() <= 0) throw new RuntimeException("unreadable image");
+            // Original game sprites can be very large. Fit them without changing aspect ratio.
+            double scale = Math.min(1.0, Math.min(240.0 / icon.getIconWidth(), 180.0 / icon.getIconHeight()));
+            if (scale < 1.0) icon = new ImageIcon(icon.getImage().getScaledInstance(
+                    Math.max(1, (int) (icon.getIconWidth() * scale)),
+                    Math.max(1, (int) (icon.getIconHeight() * scale)), Image.SCALE_DEFAULT));
+            JLabel l = new JLabel(icon);
             l.setAlignmentX(Component.CENTER_ALIGNMENT);
             return l;
         } catch (Exception e) {

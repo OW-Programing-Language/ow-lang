@@ -213,6 +213,30 @@ The interpreter (`--run` / OwIDE "Run") supports the full language including OOP
 and the UI runtime. The native **Build .exe** path (LLVM/`zig cc`) supports the
 original procedural subset (functions, `if`/`while`, integers and strings).
 
+## Packaging a standalone app
+
+With a full JDK installed, build the runtime jar above, then:
+
+```sh
+java -jar target/OwIDE.jar package path/to/src/main_ui.ow --name MyGame --type gui --out dist
+# Or use: ow package path/to/src/main_ui.ow --name MyGame --type gui --out dist
+```
+
+The app-image bundles Java, the `.ow` files under the entry directory, and
+recursive `assets/` and `models/` directories. Resources are taken from beside
+the entry, or from the project root when the entry is under `src/`; entry-local
+resource directories take precedence. Other directories and saves are not copied.
+The chosen entry is recorded in `game/entry.txt`, so `main_ui.ow` still launches
+when `main.ow` also exists. Older packages without that file default to `main.ow`.
+
+Use `--type console` for terminal input or `--type gui` for native desktop UI.
+Native images retain GIF animation and fit within 240 by 180 pixels.
+Relative image, audio, model and save paths resolve against the bundled `game/`
+directory, regardless of the launch working directory. Keep the app-image in a
+writable location if the program saves progress. Distribute the whole app folder,
+including its runtime, rather than the executable alone. Models must be supplied
+before packaging; the packager does not download them.
+
 ## Releases
 
 Prebuilt OwIDE jars and Windows installers are published on the
