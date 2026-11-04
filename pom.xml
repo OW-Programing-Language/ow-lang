@@ -15,6 +15,12 @@
     </properties>
 
     <dependencies>
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <version>4.13.2</version>
+            <scope>test</scope>
+        </dependency>
         <!-- Offline speech-to-text engine (bundles native libs + JNA).
              Used by the mic_transcribe(...) builtin. Requires a Vosk model
              at runtime; see docs/audio-and-mic.md. -->
