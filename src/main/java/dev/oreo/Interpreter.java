@@ -755,6 +755,7 @@ public class Interpreter {
             "json", "json_parse", "param", "query", "body", "body_json", "response",
             "ui_text", "ui_heading", "ui_button", "ui_row", "ui_col",
             "ui_grid", "ui_disc", "ui_image", "ui_input",
+            "ui_bar", "ui_space", "ui_card", "ui_backdrop",
             "ui_run", "ui_run_web", "ui_run_native", "ui_stop",
             "audio_play", "audio_music", "audio_stop", "mic_level", "mic_transcribe",
             "save", "load", "exists",
@@ -786,15 +787,19 @@ public class Interpreter {
             case "body_json" -> { requireArgCount(call, 0); yield Json.parse(String.valueOf(reqField("body"))); }
             case "response" -> { requireArgCount(call, 2); yield new OwResponse(
                     toInt(evalExpr(call.args.get(0), env)), evalExpr(call.args.get(1), env)); }
-            case "ui_text" -> uiNode("text", "text", str(call, 0, env));
-            case "ui_heading" -> uiNode("heading", "text", str(call, 0, env));
+            case "ui_text" -> builtinUiLabel("text", call, env);
+            case "ui_heading" -> builtinUiLabel("heading", call, env);
             case "ui_button" -> builtinUiButton(call, env);
             case "ui_row" -> uiContainer("row", call, env);
             case "ui_col" -> uiContainer("col", call, env);
             case "ui_grid" -> builtinUiGrid(call, env);
             case "ui_disc" -> uiNode("disc", "color", str(call, 0, env));
-            case "ui_image" -> { requireArgCount(call, 1); yield uiNode("image", "src", str(call, 0, env)); }
+            case "ui_image" -> builtinUiImage(call, env);
             case "ui_input" -> builtinUiInput(call, env);
+            case "ui_bar" -> builtinUiBar(call, env);
+            case "ui_space" -> builtinUiSpace(call, env);
+            case "ui_card" -> builtinUiCard(call, env);
+            case "ui_backdrop" -> builtinUiBackdrop(call, env);
             case "ui_run" -> builtinUiRun(call, env, null);
             case "ui_run_web" -> builtinUiRun(call, env, "web");
             case "ui_run_native" -> builtinUiRun(call, env, "native");
@@ -1232,6 +1237,79 @@ public class Interpreter {
         Map<String, Object> node = new LinkedHashMap<>();
         node.put("type", type);
         node.put("children", children);
+        return node;
+    }
+
+    // ui_text / ui_heading, with an optional colour (name or #rrggbb).
+    private Map<String, Object> builtinUiLabel(String type, Ast.CallExpr call, Map<String, Object> env) {
+        if (call.args.size() < 1 || call.args.size() > 2) {
+            throw new RuntimeException(call.name + " expects (text) or (text, color)");
+        }
+        Map<String, Object> node = new LinkedHashMap<>();
+        node.put("type", type);
+        node.put("text", str(call, 0, env));
+        if (call.args.size() == 2) node.put("color", str(call, 1, env));
+        return node;
+    }
+
+    // ui_image(src [, width, height]).
+    private Map<String, Object> builtinUiImage(Ast.CallExpr call, Map<String, Object> env) {
+        if (call.args.size() < 1 || call.args.size() > 3) {
+            throw new RuntimeException("ui_image expects (src) or (src, width, height)");
+        }
+        Map<String, Object> node = new LinkedHashMap<>();
+        node.put("type", "image");
+        node.put("src", str(call, 0, env));
+        if (call.args.size() >= 2) node.put("w", toInt(evalExpr(call.args.get(1), env)));
+        if (call.args.size() == 3) node.put("h", toInt(evalExpr(call.args.get(2), env)));
+        return node;
+    }
+
+    // ui_bar(value, max [, color]) — a progress/health bar.
+    private Map<String, Object> builtinUiBar(Ast.CallExpr call, Map<String, Object> env) {
+        if (call.args.size() < 2 || call.args.size() > 3) {
+            throw new RuntimeException("ui_bar expects (value, max) or (value, max, color)");
+        }
+        Map<String, Object> node = new LinkedHashMap<>();
+        node.put("type", "bar");
+        node.put("value", toInt(evalExpr(call.args.get(0), env)));
+        node.put("max", toInt(evalExpr(call.args.get(1), env)));
+        if (call.args.size() == 3) node.put("color", str(call, 2, env));
+        return node;
+    }
+
+    // ui_space([size]) — vertical spacing.
+    private Map<String, Object> builtinUiSpace(Ast.CallExpr call, Map<String, Object> env) {
+        if (call.args.size() > 1) throw new RuntimeException("ui_space expects () or (size)");
+        int size = call.args.isEmpty() ? 8 : toInt(evalExpr(call.args.get(0), env));
+        Map<String, Object> node = new LinkedHashMap<>();
+        node.put("type", "space");
+        node.put("size", size);
+        return node;
+    }
+
+    // ui_card(children [, color]) — a rounded panel wrapping a list of widgets.
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> builtinUiCard(Ast.CallExpr call, Map<String, Object> env) {
+        if (call.args.size() < 1 || call.args.size() > 2) {
+            throw new RuntimeException("ui_card expects (children) or (children, color)");
+        }
+        Object children = evalExpr(call.args.get(0), env);
+        if (!(children instanceof List<?>)) throw new RuntimeException("ui_card expects an array of widgets");
+        Map<String, Object> node = new LinkedHashMap<>();
+        node.put("type", "card");
+        node.put("children", children);
+        if (call.args.size() == 2) node.put("color", str(call, 1, env));
+        return node;
+    }
+
+    // ui_backdrop(src, child) — a full-window background image with a centered child.
+    private Map<String, Object> builtinUiBackdrop(Ast.CallExpr call, Map<String, Object> env) {
+        requireArgCount(call, 2);
+        Map<String, Object> node = new LinkedHashMap<>();
+        node.put("type", "backdrop");
+        node.put("src", str(call, 0, env));
+        node.put("child", evalExpr(call.args.get(1), env));
         return node;
     }
 

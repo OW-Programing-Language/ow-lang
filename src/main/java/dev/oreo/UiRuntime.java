@@ -317,6 +317,10 @@ public class UiRuntime implements UiHost {
               .ow-input{font:inherit;padding:10px 14px;border-radius:12px;border:1px solid var(--panel2);
                         background:var(--panel2);color:var(--text);min-width:220px;outline:none;}
               .ow-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(99,102,241,.25);}
+              .ow-bar{width:220px;height:16px;background:var(--panel2);border-radius:999px;overflow:hidden;}
+              .ow-bar-fill{height:100%;background:linear-gradient(90deg,#3fae5a,#58e07a);transition:width .15s ease;}
+              .ow-card{display:flex;flex-direction:column;align-items:center;gap:8px;background:var(--panel2);border-radius:16px;padding:16px;}
+              .ow-backdrop{position:fixed;inset:0;background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center;}
             </style>
             </head>
             <body>
@@ -329,8 +333,8 @@ public class UiRuntime implements UiHost {
               function build(node){
                 if(node == null) return document.createTextNode('');
                 const t = node.type;
-                if(t === 'text'){ const d=document.createElement('div'); d.className='ow-text'; d.textContent=node.text; return d; }
-                if(t === 'heading'){ const d=document.createElement('div'); d.className='ow-heading'; d.textContent=node.text; return d; }
+                if(t === 'text'){ const d=document.createElement('div'); d.className='ow-text'; d.textContent=node.text; if(node.color) d.style.color=node.color; return d; }
+                if(t === 'heading'){ const d=document.createElement('div'); d.className='ow-heading'; d.textContent=node.text; if(node.color){ d.style.webkitTextFillColor=node.color; d.style.color=node.color; } return d; }
                 if(t === 'button'){
                   const b=document.createElement('button'); b.className='ow-btn'; b.textContent=node.label;
                   b.addEventListener('click',()=>fire(node.id)); return b;
@@ -341,7 +345,8 @@ public class UiRuntime implements UiHost {
                 }
                 if(t === 'image'){
                   const im=document.createElement('img'); im.className='ow-image';
-                  im.src='/asset?path='+encodeURIComponent(node.src); im.alt=node.src; return im;
+                  im.src='/asset?path='+encodeURIComponent(node.src); im.alt=node.src;
+                  if(node.w) im.width=node.w; if(node.h) im.height=node.h; return im;
                 }
                 if(t === 'input'){
                   const inp=document.createElement('input'); inp.className='ow-input'; inp.type='text';
@@ -357,6 +362,22 @@ public class UiRuntime implements UiHost {
                   const d=document.createElement('div'); d.className='ow-grid';
                   d.style.gridTemplateColumns='repeat('+(node.cols||1)+', auto)';
                   (node.children||[]).forEach(ch=>d.appendChild(build(ch))); return d;
+                }
+                if(t === 'bar'){
+                  const max=(node.max||0)>0?node.max:1; const pct=Math.max(0,Math.min(100,Math.round((node.value||0)/max*100)));
+                  const d=document.createElement('div'); d.className='ow-bar';
+                  const f=document.createElement('div'); f.className='ow-bar-fill'; f.style.width=pct+'%'; if(node.color) f.style.background=node.color;
+                  d.appendChild(f); return d;
+                }
+                if(t === 'space'){ const d=document.createElement('div'); d.style.height=(node.size||8)+'px'; return d; }
+                if(t === 'card'){
+                  const d=document.createElement('div'); d.className='ow-card'; if(node.color) d.style.background=node.color;
+                  (node.children||[]).forEach(ch=>d.appendChild(build(ch))); return d;
+                }
+                if(t === 'backdrop'){
+                  const d=document.createElement('div'); d.className='ow-backdrop';
+                  d.style.backgroundImage="url('/asset?path="+encodeURIComponent(node.src)+"')";
+                  if(node.child) d.appendChild(build(node.child)); return d;
                 }
                 const d=document.createElement('div'); d.textContent=JSON.stringify(node); return d;
               }
