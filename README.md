@@ -149,9 +149,17 @@ main:
   call: ui_run("render", "Counter")
 ```
 
-UI builtins: `ui_heading`, `ui_text`, `ui_button(label, handler [, arg])`,
-`ui_row`, `ui_col`, `ui_grid(cols, children)`, `ui_disc(color)`, `ui_run` (web),
-`ui_run_web`, `ui_run_native`, `ui_stop`.
+UI builtins: `ui_heading(text [, color])`, `ui_text(text [, color])`,
+`ui_button(label, handler [, arg])`, `ui_image(src [, width, height])`,
+`ui_bar(value, max [, color])`, `ui_space([size])`, `ui_card(children [, color])`,
+`ui_backdrop(src, child)`, `ui_row`, `ui_col`, `ui_grid(cols, children)`,
+`ui_disc(color)`, `ui_run` (web), `ui_run_web`, `ui_run_native`, `ui_stop`.
+
+`ui_text`/`ui_heading` take an optional colour (a name like `"red"`/`"green"` or
+a `#rrggbb` hex). `ui_image` takes an optional size. `ui_bar` draws a rounded
+progress bar (health/XP), `ui_space` inserts vertical spacing, `ui_card` wraps
+widgets in a rounded panel, and `ui_backdrop` fills the window with a background
+image behind a centered child. All render in both the web and native backends.
 
 In **OwIDE** the toolbar has **UI Web ▶**, **UI Native ▶** and **Stop UI**
 buttons — a plain `ui_run` program follows the button you pick (via the

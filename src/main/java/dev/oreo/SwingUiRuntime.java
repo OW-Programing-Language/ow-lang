@@ -129,14 +129,14 @@ public class SwingUiRuntime implements UiHost {
             case "heading": {
                 JLabel l = new JLabel(str(m.get("text")));
                 l.setFont(font(Font.BOLD, 26));
-                l.setForeground(ACCENT.brighter());
+                l.setForeground(colorOr(m.get("color"), ACCENT.brighter()));
                 l.setAlignmentX(Component.CENTER_ALIGNMENT);
                 return l;
             }
             case "text": {
                 JLabel l = new JLabel(str(m.get("text")));
                 l.setFont(font(Font.PLAIN, 15));
-                l.setForeground(MUTED);
+                l.setForeground(colorOr(m.get("color"), MUTED));
                 l.setAlignmentX(Component.CENTER_ALIGNMENT);
                 return l;
             }
@@ -154,6 +154,16 @@ public class SwingUiRuntime implements UiHost {
                 return container(m, false);
             case "grid":
                 return grid(m);
+            case "bar":
+                return new Bar(m);
+            case "space": {
+                int s = (m.get("size") instanceof Number) ? ((Number) m.get("size")).intValue() : 8;
+                return (JComponent) javax.swing.Box.createVerticalStrut(s);
+            }
+            case "card":
+                return card(m);
+            case "backdrop":
+                return backdrop(m);
             default: {
                 JLabel l = new JLabel(type);
                 l.setForeground(TEXT);
@@ -225,11 +235,19 @@ public class SwingUiRuntime implements UiHost {
             // ImageIO.read freezes GIFs on frame one; ImageIcon keeps their animation.
             ImageIcon icon = new ImageIcon(f.getAbsolutePath());
             if (icon.getIconWidth() <= 0) throw new RuntimeException("unreadable image");
-            // Original game sprites can be very large. Fit them without changing aspect ratio.
-            double scale = Math.min(1.0, Math.min(240.0 / icon.getIconWidth(), 180.0 / icon.getIconHeight()));
-            if (scale < 1.0) icon = new ImageIcon(icon.getImage().getScaledInstance(
-                    Math.max(1, (int) (icon.getIconWidth() * scale)),
-                    Math.max(1, (int) (icon.getIconHeight() * scale)), Image.SCALE_DEFAULT));
+            int wantW = (m.get("w") instanceof Number) ? ((Number) m.get("w")).intValue() : -1;
+            int wantH = (m.get("h") instanceof Number) ? ((Number) m.get("h")).intValue() : -1;
+            if (wantW > 0 || wantH > 0) {
+                // Explicit size requested via ui_image(src, w, h).
+                icon = new ImageIcon(icon.getImage().getScaledInstance(
+                        wantW > 0 ? wantW : -1, wantH > 0 ? wantH : -1, Image.SCALE_SMOOTH));
+            } else {
+                // Original game sprites can be very large. Fit them without changing aspect ratio.
+                double scale = Math.min(1.0, Math.min(240.0 / icon.getIconWidth(), 180.0 / icon.getIconHeight()));
+                if (scale < 1.0) icon = new ImageIcon(icon.getImage().getScaledInstance(
+                        Math.max(1, (int) (icon.getIconWidth() * scale)),
+                        Math.max(1, (int) (icon.getIconHeight() * scale)), Image.SCALE_DEFAULT));
+            }
             JLabel l = new JLabel(icon);
             l.setAlignmentX(Component.CENTER_ALIGNMENT);
             return l;
@@ -257,7 +275,105 @@ public class SwingUiRuntime implements UiHost {
         return new Font("Segoe UI", style, size);
     }
 
+    /** Parse a colour name or #rrggbb string; returns fallback when unknown/null. */
+    private static Color colorOr(Object raw, Color fallback) {
+        Color c = parseColor(raw == null ? null : String.valueOf(raw));
+        return c != null ? c : fallback;
+    }
+
+    private static Color parseColor(String s) {
+        if (s == null || s.isEmpty()) return null;
+        String k = s.trim().toLowerCase();
+        try {
+            switch (k) {
+                case "red": return new Color(0xE0, 0x5A, 0x5A);
+                case "green": return new Color(0x58, 0xE0, 0x7A);
+                case "yellow": return new Color(0xF5, 0xC5, 0x42);
+                case "blue": return new Color(0x5A, 0xA0, 0xE0);
+                case "white": return Color.WHITE;
+                case "black": return Color.BLACK;
+                case "gray": case "grey": return Color.GRAY;
+                default: return k.startsWith("#") ? Color.decode(k) : null;
+            }
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    // ui_card: a rounded panel wrapping a vertical stack of widgets.
+    private JComponent card(Map<String, Object> m) {
+        RoundPanel p = new RoundPanel(colorOr(m.get("color"), PANEL2), 18);
+        p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
+        p.setBorder(BorderFactory.createEmptyBorder(16, 18, 16, 18));
+        p.setAlignmentX(Component.CENTER_ALIGNMENT);
+        List<Object> kids = children(m);
+        for (int i = 0; i < kids.size(); i++) {
+            if (i > 0) p.add(javax.swing.Box.createVerticalStrut(8));
+            JComponent c = build(kids.get(i));
+            c.setAlignmentX(Component.CENTER_ALIGNMENT);
+            p.add(c);
+        }
+        return p;
+    }
+
+    // ui_backdrop: a full-size background image with a centered child on top.
+    @SuppressWarnings("unchecked")
+    private JComponent backdrop(Map<String, Object> m) {
+        final Image img = backdropImage(str(m.get("src")));
+        Object childNode = m.get("child");
+        JComponent child = (childNode instanceof Map) ? build((Map<String, Object>) childNode) : null;
+        JPanel p = new JPanel(new java.awt.GridBagLayout()) {
+            @Override protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                if (img != null) g.drawImage(img, 0, 0, getWidth(), getHeight(), this);
+            }
+        };
+        p.setBackground(BG);
+        if (child != null) p.add(child);
+        return p;
+    }
+
+    private Image backdropImage(String path) {
+        try {
+            java.io.File f = new java.io.File(path);
+            if (!f.isAbsolute()) f = new java.io.File(System.getProperty("user.dir"), path);
+            if (!f.exists()) return null;
+            ImageIcon icon = new ImageIcon(f.getAbsolutePath());
+            return icon.getIconWidth() > 0 ? icon.getImage() : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     // ---- custom-painted widgets ----
+
+    /** ui_bar: a rounded dark track with a coloured fill (health/XP). */
+    private static class Bar extends JComponent {
+        private final int value, max;
+        private final Color fill;
+        Bar(Map<String, Object> m) {
+            this.value = (m.get("value") instanceof Number) ? ((Number) m.get("value")).intValue() : 0;
+            this.max = (m.get("max") instanceof Number) ? ((Number) m.get("max")).intValue() : 1;
+            this.fill = colorOr(m.get("color"), new Color(0x58, 0xE0, 0x7A));
+            setAlignmentX(Component.CENTER_ALIGNMENT);
+        }
+        @Override public Dimension getPreferredSize() { return new Dimension(220, 16); }
+        @Override public Dimension getMaximumSize() { return new Dimension(260, 16); }
+        @Override protected void paintComponent(Graphics g) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            int w = getWidth(), h = getHeight();
+            g2.setColor(new Color(0x1F, 0x24, 0x30));
+            g2.fill(new RoundRectangle2D.Float(0, 0, w, h, h, h));
+            int denom = max > 0 ? max : 1;
+            int fw = Math.round(w * Math.max(0f, Math.min(1f, value / (float) denom)));
+            if (fw > 0) {
+                g2.setColor(fill);
+                g2.fill(new RoundRectangle2D.Float(0, 0, fw, h, h, h));
+            }
+            g2.dispose();
+        }
+    }
 
     /** Rounded dark panel used as the window "card". */
     private static class Card extends JPanel {
