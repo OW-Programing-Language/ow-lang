@@ -20,3 +20,13 @@ jobs:
           cache: maven
       - name: Compile and test interface checking
         run: mvn -B test
+      - name: Build and run typed functor demonstration
+        run: |
+          mvn -q -DskipTests package
+          java -jar target/OwIDE.jar run examples/typed_functor.ow
+      - name: Reject invalid typed functor argument
+        run: |
+          if java -jar target/OwIDE.jar run examples/typed_functor_invalid.ow; then
+            echo "ERROR: typed functor accepted an invalid module"
+            exit 1
+          fi
