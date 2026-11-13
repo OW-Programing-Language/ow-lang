@@ -164,7 +164,15 @@ public final class StaticModuleValueChecker {
                     if (required == null) continue;
                     if (declaration.abstractTypes.contains(required)) {
                         ValueType expected = typeMember(target, required);
-                        if (expected != null) ensureSame(expected, passed, call.line);
+                        if (expected != null) {
+                            if (expected.primitive != null && passed.abstractIdentity != null) {
+                                throw error(call.line, "manifest type " + declaration.name +
+                                        "." + required + " expects " + expected.primitive +
+                                        "; opaque type " + passed.abstractIdentity +
+                                        " cannot be used as " + expected.primitive);
+                            }
+                            ensureSame(expected, passed, call.line);
+                        }
                     } else {
                         ensureAssignable(required, passed, call.line);
                     }
@@ -258,7 +266,7 @@ public final class StaticModuleValueChecker {
     private static void ensureSame(ValueType expected, ValueType actual, int line) {
         if (expected.abstractIdentity != null) {
             if (!expected.abstractIdentity.equals(actual.abstractIdentity)) {
-                throw error(line, "abstract type mismatch: expected " +
+                throw error(line, "Abstract type mismatch (static abstract type mismatch): expected " +
                         expected.abstractIdentity + ", got " +
                         (actual.abstractIdentity != null ? actual.abstractIdentity : actual.primitive));
             }
