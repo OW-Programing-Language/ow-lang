@@ -21,13 +21,21 @@ public class OwCompiler {
     }
 
     public void compileToExe(Path inputOw, Path outputExe) throws Exception {
-        String src = Files.readString(inputOw, StandardCharsets.UTF_8);
+        // Parse all imported files and validate module signatures at build time.
+        // This never executes main or invokes the target toolchain.
+        Ast.Program program = Loader.load(inputOw);
+        ModuleTypeChecker.check(program);
 
-        // 1) lex + parse
-        Lexer lexer = new Lexer(src);
-        List<Lexer.Token> tokens = lexer.lexAll();
-        Parser parser = new Parser(tokens);
-        Ast.Program program = parser.parseProgram();
+        // The current LLVM backend does not lower first-class module values.
+        // Fail explicitly rather than silently compiling a program that drops
+        // its module declarations or calls.
+        if (!program.moduleTypes.isEmpty() || !program.modules.isEmpty() ||
+            !program.functors.isEmpty() || !program.functorTypes.isEmpty()) {
+            throw new UnsupportedOperationException(
+                    "Native LLVM code generation does not yet support OW module/functor " +
+                    "values. Module signatures were checked; use 'ow run' to execute " +
+                    "or 'ow check' to verify without execution.");
+        }
 
         // 2) generate LLVM IR
         String moduleName = outputExe.getFileName().toString().replace('.', '_');

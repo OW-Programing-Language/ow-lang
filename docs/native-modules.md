@@ -187,3 +187,16 @@ abstract type escapes. Import errors, forbidden infra references and import
 cycles include the original file and import line/column. Lexer tokens carry
 1-based source spans with exclusive end columns. Ordinary dynamic expressions
 still require interpreter checks and are not all statically typed.
+
+## Compile-time semantic validation
+
+Run `ow check path/to/file.ow` to parse imports and validate native module
+declarations, functor applications, known module values, and abstract
+representation escapes **without executing `main`**. Errors include file,
+line and column when known. This command is suitable for CI preflight checks.
+
+`ow build` also invokes the module semantic checker, and now **refuses**
+first-class module/functor code with an explicit unsupported LLVM-backend error.
+The procedural LLVM subset cannot yet lower OW module values; refusing to
+silently emit an incomplete executable is intentional. Use `ow run` for module
+execution. Full native-code module compilation remains a separate task.

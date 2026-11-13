@@ -23,6 +23,18 @@ jobs:
           cache: maven
       - name: Compile and test
         run: mvn -B clean test package
+      - name: OW compile-time module checks without interpreter execution
+        run: |
+          java -jar target/OwIDE.jar check examples/module_calculus/main.ow
+          java -jar target/OwIDE.jar check examples/module_calculus/set_make.ow
+          java -jar target/OwIDE.jar check examples/module_calculus/named_type_sharing.ow
+          java -jar target/OwIDE.jar check examples/module_calculus/dependent_result.ow
+          for file in tests/module_calculus_missing_method.ow tests/module_named_type_bad_constraint.ow tests/module_named_type_cycle.ow tests/module_set_make_wrong_signature.ow tests/module_set_make_wrong_element.ow; do
+            if java -jar target/OwIDE.jar check "$file"; then
+              echo "ERROR: invalid module program passed static checking: $file"
+              exit 1
+            fi
+          done
       - name: Execute multi-file module and functor example
         run: java -jar target/OwIDE.jar run examples/module_calculus/main.ow
       - name: Verify opaque abstract type members
