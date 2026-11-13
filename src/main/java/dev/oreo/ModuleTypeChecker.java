@@ -66,10 +66,45 @@ public final class ModuleTypeChecker {
             if (functor.argument.equals(functor.name)) {
                 throw new RuntimeException("Functor " + functor.name + " shadows its own name");
             }
+            Ast.ModuleTypeDecl input = signatures.get(functor.inputSignature);
+            Ast.ModuleTypeDecl output = signatures.get(functor.outputSignature);
+            for (Map.Entry<String, String> entry : functor.typeAliases.entrySet()) {
+                String type = entry.getValue();
+                if (!type.contains(".")) continue;
+                validateDependentPath(functor, input, type);
+            }
+            for (Map.Entry<String, String> sharing : functor.typeSharing.entrySet()) {
+                String member = sharing.getKey();
+                if (output == null || !output.abstractTypes.contains(member)) {
+                    throw new RuntimeException("Functor " + functor.name +
+                            " constrains unknown output type " + member);
+                }
+                validateDependentPath(functor, input, sharing.getValue());
+                if (!sharing.getValue().equals(functor.typeAliases.get(member))) {
+                    throw new RuntimeException("Functor " + functor.name +
+                            " must implement with_type " + member + " = " + sharing.getValue());
+                }
+                String inputMember = sharing.getValue().substring(sharing.getValue().indexOf('.') + 1);
+                if (output.manifestTypes.containsKey(member) &&
+                    !Objects.equals(output.manifestTypes.get(member), input.manifestTypes.get(inputMember))) {
+                    throw new RuntimeException("Functor " + functor.name +
+                            " has incompatible manifest type constraint " + member);
+                }
+            }
             validateMethods("functor " + functor.name, functor.outputSignature,
                     functor.methods, functor.typeAliases, signatures);
         }
         verifyApplications(program, signatures);
+    }
+
+    private static void validateDependentPath(Ast.FunctorDecl functor,
+                                              Ast.ModuleTypeDecl input, String path) {
+        String[] parts = path.split("\\.", -1);
+        if (parts.length != 2 || !parts[0].equals(functor.argument) ||
+            input == null || !input.abstractTypes.contains(parts[1])) {
+            throw new RuntimeException("Functor " + functor.name +
+                    " has invalid dependent type path " + path);
+        }
     }
 
     /**

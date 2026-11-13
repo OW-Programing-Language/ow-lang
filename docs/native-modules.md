@@ -75,3 +75,27 @@ fully static analysis of functor bodies, compilation to native binaries,
 fine-grained source-span diagnostics, and compiler-enforced import boundaries.
 
 Existing OW files without module declarations keep their prior semantics.
+
+## Path-dependent functor result types
+
+Functor result signatures can now share abstract types with their module
+parameter, using an explicit `with_type` equation:
+
+```ow
+functor Forward(S: BOX) -> BOX with_type token = S.token:
+  type token: S.token
+  fn wrap(value int) -> token:
+    return: S.wrap(value)
+  fn unwrap(value token) -> int:
+    return: S.unwrap(value)
+```
+
+This is different from giving the result a fresh opaque type: a token issued
+by `S` can be passed directly to the result, and a token returned by the result
+can be used by `S`. The module checker validates the equality path and the
+implementation declaration before `main`; public calls enforce it at runtime.
+The alias does *not* grant access to `S`'s private representation.
+See [dependent_result.ow](../examples/module_calculus/dependent_result.ow).
+
+This implements **first-order dependent result sharing**, not the full OCaml
+`with type` constraint language or static path-dependent type inference.
