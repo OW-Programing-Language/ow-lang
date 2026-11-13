@@ -304,3 +304,10 @@ The runtime seals the concrete integer into an opaque module-specific value,
 preventing callers from mixing values from different BOX modules. Try
 [abstract_types.ow](examples/module_calculus/abstract_types.ow). Type sharing
 constraints and generative/applicative identities are still being developed.
+
+### Applicative and generative functors
+
+`functor Make(S: SOURCE) -> BOX` reuses abstract type identities for repeated
+applications with the same stable module argument. For explicit generativity,
+`functor_gen Fresh(S: SOURCE) -> BOX` creates fresh identities on each call.
+See [functor_identity.ow](examples/module_calculus/functor_identity.ow).

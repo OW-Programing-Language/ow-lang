@@ -55,10 +55,16 @@ values. A `token` from one named module cannot be passed to another module,
 even when both represent tokens internally as integers. See
 [abstract_types.ow](../examples/module_calculus/abstract_types.ow).
 
+Native functors are **applicative** by default: applying the same functor to
+the same stable argument module path gives its abstract result types the same
+identity. Explicit `functor_gen` creates fresh result type identities for
+each application, even with the same argument. See
+[functor_identity.ow](../examples/module_calculus/functor_identity.ow).
+
 The implementation is an **incremental stage**, not a full OCaml module calculus.
 The following are not implemented and remain acceptance criteria in #16:
 full abstract-type polymorphism, type-sharing constraints, path-dependent type
-identities, higher-order functors, applicative/generative abstract types,
+identities, higher-order functors, the full applicative/generative static type calculus,
 fully static analysis of functor bodies, compilation to native binaries,
 fine-grained source-span diagnostics, and compiler-enforced import boundaries.
 
