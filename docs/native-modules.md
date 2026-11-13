@@ -222,3 +222,16 @@ cycles, incompatible method overrides and conflicting manifest types.
 Imports can supply included signatures from other files.
 This is **signature inclusion only**; implementation-level `include`,
 nested module paths and module-alias syntax remain future OW work.
+
+## Native module aliases and nested paths
+
+OW now supports transparent aliases: `module Inventory = Warehouse` and
+qualified aliases such as `module Shop.Inventory = Warehouse`. Aliases preserve
+the original module value, signature and opaque type identity. `Shop.Inventory`
+is a namespace path accepted in method calls, typed bindings and functor input
+expressions. The checker rejects unknown alias targets, cycles and namespace
+collisions. See [module_aliases.ow](../examples/module_calculus/module_aliases.ow).
+
+**Limit:** these are *nested alias paths*, not full OCaml nested module
+implementations, module functors as submodules, or arbitrary first-class module
+packing/unpacking. Those require further syntax/type-system work.

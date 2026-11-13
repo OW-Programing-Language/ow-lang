@@ -33,6 +33,11 @@ public final class StaticModuleValueChecker {
             checker.moduleValues.put(module.name,
                     new ModuleRef(module.signature, module.name, module.typeAliases, Map.of()));
         }
+        for (Map.Entry<String, String> alias :
+                ModuleTypeChecker.resolvedAliases(program).entrySet()) {
+            ModuleRef original = checker.moduleValues.get(alias.getValue());
+            if (original != null) checker.moduleValues.put(alias.getKey(), original);
+        }
         for (Ast.FunctorDecl functor : program.functors) {
             checker.functors.put(functor.name, functor);
         }
@@ -113,6 +118,10 @@ public final class StaticModuleValueChecker {
 
     private ModuleRef inferModule(Ast.Expr expr) {
         if (expr instanceof Ast.Var variable) return moduleValues.get(variable.name);
+        if (expr instanceof Ast.FieldAccess field) {
+            String path = modulePath(field);
+            return path == null ? null : moduleValues.get(path);
+        }
         if (!(expr instanceof Ast.CallExpr call)) return null;
         Ast.FunctorDecl functor = functors.get(call.name);
         if (functor == null || call.args.size() != 1 || functor.returnedFunctor != null) {
@@ -125,6 +134,15 @@ public final class StaticModuleValueChecker {
                 : functor.name + "(" + argument.identity + ")";
         return new ModuleRef(functor.outputSignature, identity, functor.typeAliases,
                 Map.of(functor.argument, argument));
+    }
+
+    private static String modulePath(Ast.Expr expr) {
+        if (expr instanceof Ast.Var variable) return variable.name;
+        if (expr instanceof Ast.FieldAccess field) {
+            String parent = modulePath(field.target);
+            return parent == null ? null : parent + "." + field.field;
+        }
+        return null;
     }
 
     private ValueType typeMember(ModuleRef module, String member) {

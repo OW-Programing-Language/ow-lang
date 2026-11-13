@@ -105,6 +105,12 @@ public class Interpreter {
         @Override public String toString() { return "<functor " + declaration.name + ">"; }
     }
 
+    /** Dotted native module paths, e.g. Shop.Inventory. */
+    public static final class OwNamespace {
+        final Map<String, Object> members = new LinkedHashMap<>();
+        @Override public String toString() { return "<module namespace>"; }
+    }
+
     private final Map<String, Ast.ModuleTypeDecl> moduleTypes = new LinkedHashMap<>();
     private final Map<String, Ast.FunctorTypeDecl> functorTypes = new LinkedHashMap<>();
     private final Map<String, Ast.FunctorDecl> moduleFunctors = new LinkedHashMap<>();
@@ -211,6 +217,16 @@ public class Interpreter {
             globals.put(mod.name, new OwModule(mod.name, mod.signature, mod.methods, Map.of(),
                                               mod.typeAliases, mod.name));
         }
+        // Alias references preserve the exact original OwModule object and
+        // its abstract-type identity. Namespaces only expose child paths.
+        Map<String, String> resolvedModuleAliases = ModuleTypeChecker.resolvedAliases(program);
+        for (Map.Entry<String, String> alias : resolvedModuleAliases.entrySet()) {
+            Object original = globals.get(alias.getValue());
+            if (!(original instanceof OwModule)) {
+                throw new RuntimeException("Unknown aliased module " + alias.getValue());
+            }
+            installModuleAlias(alias.getKey(), original);
+        }
         for (Ast.FunctorDecl functor : program.functors) {
             moduleFunctors.put(functor.name, functor);
             globals.put(functor.name, new OwFunctor(functor, Map.of()));
@@ -237,6 +253,38 @@ public class Interpreter {
             execBlock(program.mainBody, globals);
         } finally {
             if (ui != null) ui.shutdown();
+        }
+    }
+
+    private void installModuleAlias(String path, Object value) {
+        String[] parts = path.split("\\.");
+        if (parts.length == 1) {
+            if (globals.containsKey(path)) throw new RuntimeException("Duplicate module alias " + path);
+            globals.put(path, value);
+            return;
+        }
+        Object existing = globals.get(parts[0]);
+        if (existing == null) {
+            existing = new OwNamespace();
+            globals.put(parts[0], existing);
+        }
+        if (!(existing instanceof OwNamespace)) {
+            throw new RuntimeException("Module namespace conflicts with " + parts[0]);
+        }
+        OwNamespace current = (OwNamespace) existing;
+        for (int i = 1; i < parts.length - 1; i++) {
+            Object child = current.members.get(parts[i]);
+            if (child == null) {
+                child = new OwNamespace();
+                current.members.put(parts[i], child);
+            }
+            if (!(child instanceof OwNamespace)) {
+                throw new RuntimeException("Module namespace conflicts with " + path);
+            }
+            current = (OwNamespace) child;
+        }
+        if (current.members.putIfAbsent(parts[parts.length - 1], value) != null) {
+            throw new RuntimeException("Duplicate module alias " + path);
         }
     }
 
@@ -470,6 +518,11 @@ public class Interpreter {
                 return enumValue(tv.name, fa.field);
             }
             Object target = evalExpr(fa.target, env);
+            if (target instanceof OwNamespace namespace) {
+                if (!namespace.members.containsKey(fa.field))
+                    throw new RuntimeException("Unknown nested module " + fa.field);
+                return namespace.members.get(fa.field);
+            }
             if (target instanceof OwRecord rec) {
                 return rec.get(fa.field);
             }

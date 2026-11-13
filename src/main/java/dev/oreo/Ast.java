@@ -37,6 +37,7 @@ public class Ast {
         public final List<ModuleDecl> modules;
         public final List<FunctorDecl> functors;
         public final List<FunctorTypeDecl> functorTypes;
+        public final List<ModuleAliasDecl> moduleAliases;
         public final List<Stmt> mainBody; // may be null in imported (non-entry) files
 
         public Program(List<String> imports,
@@ -56,6 +57,7 @@ public class Ast {
             this.modules = List.of();
             this.functors = List.of();
             this.functorTypes = List.of();
+            this.moduleAliases = List.of();
             this.mainBody = mainBody;
         }
 
@@ -83,6 +85,21 @@ public class Ast {
                        List<FunctorDecl> functors,
                        List<FunctorTypeDecl> functorTypes,
                        List<Stmt> mainBody) {
+            this(imports, functions, enums, interfaces, classes, models,
+                 moduleTypes, modules, functors, functorTypes, List.of(), mainBody);
+        }
+        public Program(List<String> imports,
+                       List<FnDecl> functions,
+                       List<EnumDecl> enums,
+                       List<InterfaceDecl> interfaces,
+                       List<ClassDecl> classes,
+                       List<ModelDecl> models,
+                       List<ModuleTypeDecl> moduleTypes,
+                       List<ModuleDecl> modules,
+                       List<FunctorDecl> functors,
+                       List<FunctorTypeDecl> functorTypes,
+                       List<ModuleAliasDecl> moduleAliases,
+                       List<Stmt> mainBody) {
             this.imports = imports;
             this.functions = functions;
             this.enums = enums;
@@ -93,6 +110,7 @@ public class Ast {
             this.modules = modules;
             this.functors = functors;
             this.functorTypes = functorTypes;
+            this.moduleAliases = moduleAliases;
             this.mainBody = mainBody;
         }
     }
@@ -156,6 +174,17 @@ public class Ast {
             this.methods = methods;
             this.typeAliases = typeAliases;
             this.typeSharing = typeSharing;
+            this.span = span;
+        }
+    }
+
+    /** An alias and its original native module share a single identity. */
+    public static class ModuleAliasDecl {
+        public final String name, target;
+        public final SourceSpan span;
+        public ModuleAliasDecl(String name, String target, SourceSpan span) {
+            this.name = name;
+            this.target = target;
             this.span = span;
         }
     }

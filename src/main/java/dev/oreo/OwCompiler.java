@@ -30,7 +30,8 @@ public class OwCompiler {
         // Fail explicitly rather than silently compiling a program that drops
         // its module declarations or calls.
         if (!program.moduleTypes.isEmpty() || !program.modules.isEmpty() ||
-            !program.functors.isEmpty() || !program.functorTypes.isEmpty()) {
+            !program.functors.isEmpty() || !program.functorTypes.isEmpty() ||
+            !program.moduleAliases.isEmpty()) {
             throw new UnsupportedOperationException(
                     "Native LLVM code generation does not yet support OW module/functor " +
                     "values. Module signatures were checked; use 'ow run' to execute " +
