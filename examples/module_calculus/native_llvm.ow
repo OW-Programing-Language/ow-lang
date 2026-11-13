@@ -1,0 +1,21 @@
+# Real native LLVM lowering for statically resolved, integer-only
+# module functions and a specialized functor application.
+module_type READ:
+  fn read(value int) -> int
+
+module Shop.Storage: READ
+  fn read(value int) -> int:
+    return: value + 3
+
+module Storage = Shop.Storage
+
+module_type RESULT:
+  fn score(value int) -> int
+
+functor MakeScore(Source: READ) -> RESULT:
+  fn score(value int) -> int:
+    return: Source.read(value) * 2
+
+main:
+  set report RESULT: MakeScore(Storage)
+  print: report.score(4)

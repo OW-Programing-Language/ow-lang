@@ -63,6 +63,11 @@ jobs:
         run: |
           java -jar target/OwIDE.jar check examples/module_calculus/implementation_include.ow
           java -jar target/OwIDE.jar run examples/module_calculus/implementation_include.ow
+      - name: Compile static native module functor to executable via LLVM
+        run: |
+          java -jar target/OwIDE.jar llvm examples/module_calculus/native_llvm.ow /tmp/ow-static-modules.ll
+          clang /tmp/ow-static-modules.ll -o /tmp/ow-static-modules
+          test "$(/tmp/ow-static-modules)" = "14"
       - name: Reject malformed modules, functor arguments, and hidden exports
         run: |
           for file in tests/module_calculus_*.ow tests/module_abstract_*.ow tests/module_functor_generative_mismatch.ow tests/module_manifest_mismatch.ow tests/module_dependent_*.ow tests/module_higher_order_*.ow tests/module_named_type_*.ow tests/module_set_make_*.ow; do
