@@ -38,8 +38,39 @@ public final class ModuleTypeChecker {
         return signatures;
     }
 
+    public static Map<String, Ast.FunctorTypeDecl> functorSignatures(Ast.Program program) {
+        Map<String, Ast.FunctorTypeDecl> result = new LinkedHashMap<>();
+        Map<String, Ast.ModuleTypeDecl> modules = signatures(program);
+        for (Ast.FunctorTypeDecl signature : program.functorTypes) {
+            if (result.putIfAbsent(signature.name, signature) != null) {
+                throw new RuntimeException("Duplicate functor_type " + signature.name);
+            }
+            if (!modules.containsKey(signature.inputSignature) ||
+                !modules.containsKey(signature.outputSignature)) {
+                throw new RuntimeException("functor_type " + signature.name +
+                        " requires module signatures for input and output");
+            }
+        }
+        return result;
+    }
+
+    /** Argument contravariance and result covariance under structural width. */
+    public static boolean matchesFunctor(Ast.FunctorDecl actual, Ast.FunctorTypeDecl target,
+                                         Map<String, Ast.ModuleTypeDecl> signatures) {
+        return actual != null && target != null &&
+               matches(signatures.get(target.inputSignature), signatures.get(actual.inputSignature)) &&
+               matches(signatures.get(actual.outputSignature), signatures.get(target.outputSignature));
+    }
+
     public static void check(Ast.Program program) {
         Map<String, Ast.ModuleTypeDecl> signatures = signatures(program);
+        Map<String, Ast.FunctorTypeDecl> functorTypes = functorSignatures(program);
+        Map<String, Ast.FunctorDecl> allFunctors = new HashMap<>();
+        for (Ast.FunctorDecl declared : program.functors) {
+            if (allFunctors.putIfAbsent(declared.name, declared) != null) {
+                throw new RuntimeException("Duplicate functor declaration " + declared.name);
+            }
+        }
         Set<String> reserved = new HashSet<>();
         for (Ast.FnDecl fn : program.functions) reserved.add(fn.name);
         for (Ast.ClassDecl cls : program.classes) reserved.add(cls.name);
@@ -47,6 +78,11 @@ public final class ModuleTypeChecker {
         for (Ast.ModuleTypeDecl sig : program.moduleTypes) {
             if (!reserved.add(sig.name)) {
                 throw new RuntimeException("Duplicate global declaration " + sig.name);
+            }
+        }
+        for (Ast.FunctorTypeDecl type : program.functorTypes) {
+            if (!reserved.add(type.name)) {
+                throw new RuntimeException("Duplicate global declaration " + type.name);
             }
         }
         for (Ast.ModuleDecl mod : program.modules) {
@@ -59,7 +95,8 @@ public final class ModuleTypeChecker {
             if (!reserved.add(functor.name)) {
                 throw new RuntimeException("Duplicate global declaration " + functor.name);
             }
-            if (!signatures.containsKey(functor.inputSignature)) {
+            if (!signatures.containsKey(functor.inputSignature) &&
+                !functorTypes.containsKey(functor.inputSignature)) {
                 throw new RuntimeException("Functor " + functor.name +
                         " references unknown input signature " + functor.inputSignature);
             }
@@ -91,8 +128,40 @@ public final class ModuleTypeChecker {
                             " has incompatible manifest type constraint " + member);
                 }
             }
-            validateMethods("functor " + functor.name, functor.outputSignature,
-                    functor.methods, functor.typeAliases, signatures);
+            if (functorTypes.containsKey(functor.outputSignature)) {
+                if (functor.returnedFunctor == null) {
+                    throw new RuntimeException("Functor " + functor.name +
+                            " must declare return_functor to satisfy " + functor.outputSignature);
+                }
+                if (!functor.methods.isEmpty() || !functor.typeAliases.isEmpty() ||
+                    !functor.typeSharing.isEmpty()) {
+                    throw new RuntimeException("Functor " + functor.name +
+                            " returning a functor cannot also export module methods or types");
+                }
+                Ast.FunctorTypeDecl required = functorTypes.get(functor.outputSignature);
+                if (functor.returnedFunctor.equals(functor.argument)) {
+                    Ast.FunctorTypeDecl supplied = functorTypes.get(functor.inputSignature);
+                    if (supplied == null ||
+                        !matches(signatures.get(required.inputSignature), signatures.get(supplied.inputSignature)) ||
+                        !matches(signatures.get(supplied.outputSignature), signatures.get(required.outputSignature))) {
+                        throw new RuntimeException("Functor " + functor.name +
+                                " returns an incompatible functor argument");
+                    }
+                } else {
+                    Ast.FunctorDecl supplied = allFunctors.get(functor.returnedFunctor);
+                    if (!matchesFunctor(supplied, required, signatures)) {
+                        throw new RuntimeException("Functor " + functor.name +
+                                " returns incompatible functor " + functor.returnedFunctor);
+                    }
+                }
+            } else {
+                if (functor.returnedFunctor != null) {
+                    throw new RuntimeException("Functor " + functor.name +
+                            " cannot return_functor for module signature " + functor.outputSignature);
+                }
+                validateMethods("functor " + functor.name, functor.outputSignature,
+                        functor.methods, functor.typeAliases, signatures);
+            }
         }
         verifyApplications(program, signatures);
     }
@@ -127,7 +196,8 @@ public final class ModuleTypeChecker {
         }
         for (Ast.FunctorDecl functor : program.functors) {
             Map<String, String> locals = new HashMap<>(known);
-            locals.put(functor.argument, functor.inputSignature);
+            if (signatures.containsKey(functor.inputSignature))
+                locals.put(functor.argument, functor.inputSignature);
             for (Ast.MethodDecl method : functor.methods) {
                 validateStmts(method.body, new HashMap<>(locals), signatures, functors);
             }
@@ -213,8 +283,10 @@ public final class ModuleTypeChecker {
             }
             if (inputs.get(0) != null &&
                     !matches(signatures.get(inputs.get(0)), signatures.get(functor.inputSignature))) {
+                String expects = signatures.containsKey(functor.inputSignature)
+                        ? functor.inputSignature : "functor " + functor.inputSignature;
                 throw moduleError(call.line, "Functor " + call.name + " requires " +
-                        functor.inputSignature + ", got " + inputs.get(0));
+                        expects + ", got " + inputs.get(0));
             }
             return functor.outputSignature;
         }
@@ -223,6 +295,7 @@ public final class ModuleTypeChecker {
             for (Ast.Expr arg : call.args) inferModule(arg, known, signatures, functors);
             if (targetSignature != null) {
                 Ast.ModuleTypeDecl signature = signatures.get(targetSignature);
+                if (signature == null) return null;
                 Ast.MethodSig method = null;
                 for (Ast.MethodSig m : signature.methods) {
                     if (m.name.equals(call.method)) { method = m; break; }

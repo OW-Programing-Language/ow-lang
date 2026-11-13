@@ -95,7 +95,18 @@ public class Interpreter {
         @Override public String toString() { return "<module " + name + " : " + signature + ">"; }
     }
 
+    public static final class OwFunctor {
+        public final Ast.FunctorDecl declaration;
+        public final Map<String, Object> captured;
+        OwFunctor(Ast.FunctorDecl declaration, Map<String, Object> captured) {
+            this.declaration = declaration;
+            this.captured = captured;
+        }
+        @Override public String toString() { return "<functor " + declaration.name + ">"; }
+    }
+
     private final Map<String, Ast.ModuleTypeDecl> moduleTypes = new LinkedHashMap<>();
+    private final Map<String, Ast.FunctorTypeDecl> functorTypes = new LinkedHashMap<>();
     private final Map<String, Ast.FunctorDecl> moduleFunctors = new LinkedHashMap<>();
     private long generativeSerial = 0;
 
@@ -170,6 +181,7 @@ public class Interpreter {
         // This is a load-time semantic check, not a general static type checker.
         ModuleTypeChecker.check(program);
         moduleTypes.putAll(ModuleTypeChecker.signatures(program));
+        functorTypes.putAll(ModuleTypeChecker.functorSignatures(program));
         for (Ast.ModuleTypeDecl sig : program.moduleTypes) {
             for (Ast.MethodSig method : sig.methods) {
                 for (String type : method.paramTypes) {
@@ -197,6 +209,7 @@ public class Interpreter {
         }
         for (Ast.FunctorDecl functor : program.functors) {
             moduleFunctors.put(functor.name, functor);
+            globals.put(functor.name, new OwFunctor(functor, Map.of()));
             Ast.ModuleTypeDecl signature = moduleTypes.get(functor.outputSignature);
             for (String underlying : functor.typeAliases.values()) {
                 // The module type checker validates dependent paths such as Arg.token.
@@ -526,28 +539,10 @@ public class Interpreter {
             return compare(c.op, l, r) ? 1 : 0;
         }
         if (e instanceof Ast.CallExpr call) {
-            if (moduleFunctors.containsKey(call.name)) {
-                Ast.FunctorDecl functor = moduleFunctors.get(call.name);
-                if (call.args.size() != 1) {
-                    throw new RuntimeException("Functor " + functor.name +
-                            " expects exactly one module argument");
-                }
-                Object argument = evalExpr(call.args.get(0), env);
-                if (!(argument instanceof OwModule mod)) {
-                    throw new RuntimeException("Functor " + functor.name +
-                            " requires module " + functor.inputSignature + ", got " + formatValue(argument));
-                }
-                Ast.ModuleTypeDecl actual = moduleTypes.get(mod.signature);
-                Ast.ModuleTypeDecl expected = moduleTypes.get(functor.inputSignature);
-                if (!ModuleTypeChecker.matches(actual, expected)) {
-                    throw new RuntimeException("Functor " + functor.name + " requires " +
-                            functor.inputSignature + ", got " + mod.signature);
-                }
-                String identity = functor.generative
-                        ? functor.name + "#fresh" + (++generativeSerial)
-                        : functor.name + "(" + mod.identity + ")";
-                return new OwModule(functor.name + "(" + mod.name + ")", functor.outputSignature,
-                        functor.methods, Map.of(functor.argument, mod), functor.typeAliases, identity);
+            Object functorValue = env.containsKey(call.name)
+                    ? env.get(call.name) : globals.get(call.name);
+            if (functorValue instanceof OwFunctor functor) {
+                return applyFunctor(functor, call.args, env);
             }
             if (isBuiltin(call.name)) {
                 return evalBuiltin(call, env);
@@ -559,6 +554,52 @@ public class Interpreter {
             return invokeFunction(fn, args);
         }
         throw new RuntimeException("Unknown expression: " + e.getClass().getSimpleName());
+    }
+
+    /** Apply a first-class functor; argument and result may themselves be functors. */
+    private Object applyFunctor(OwFunctor value, List<Ast.Expr> arguments, Map<String, Object> env) {
+        Ast.FunctorDecl functor = value.declaration;
+        if (arguments.size() != 1) {
+            throw new RuntimeException("Functor " + functor.name + " expects exactly one argument");
+        }
+        Object supplied = evalExpr(arguments.get(0), env);
+        if (moduleTypes.containsKey(functor.inputSignature)) {
+            if (!(supplied instanceof OwModule module) ||
+                    !ModuleTypeChecker.matches(moduleTypes.get(module.signature),
+                                               moduleTypes.get(functor.inputSignature))) {
+                throw new RuntimeException("Functor " + functor.name +
+                        " requires module " + functor.inputSignature + ", got " + formatValue(supplied));
+            }
+        } else if (functorTypes.containsKey(functor.inputSignature)) {
+            if (!(supplied instanceof OwFunctor actual) ||
+                    !ModuleTypeChecker.matchesFunctor(actual.declaration,
+                            functorTypes.get(functor.inputSignature), moduleTypes)) {
+                throw new RuntimeException("Functor " + functor.name +
+                        " requires functor " + functor.inputSignature + ", got " + formatValue(supplied));
+            }
+        } else {
+            throw new RuntimeException("Unknown functor input signature " + functor.inputSignature);
+        }
+        Map<String, Object> captured = new HashMap<>(value.captured);
+        captured.put(functor.argument, supplied);
+        if (functor.returnedFunctor != null) {
+            Object returned = captured.containsKey(functor.returnedFunctor)
+                    ? captured.get(functor.returnedFunctor)
+                    : globals.get(functor.returnedFunctor);
+            if (!(returned instanceof OwFunctor)) {
+                throw new RuntimeException("Functor " + functor.name +
+                        " returned unknown functor " + functor.returnedFunctor);
+            }
+            return returned;
+        }
+        String suppliedIdentity = supplied instanceof OwModule m ? m.identity
+                : ((OwFunctor) supplied).declaration.name;
+        String identity = functor.generative
+                ? functor.name + "#fresh" + (++generativeSerial)
+                : functor.name + "(" + suppliedIdentity + ")";
+        return new OwModule(functor.name + "(" + suppliedIdentity + ")",
+                functor.outputSignature, functor.methods, captured,
+                functor.typeAliases, identity);
     }
 
     private Object invokeFunction(Ast.FnDecl fn, List<Object> args) {
@@ -772,7 +813,8 @@ public class Interpreter {
         if (Set.of("int", "string", "str", "bool", "boolean", "array", "list", "float", "double")
                 .contains(name)) return;
         if (classes.containsKey(name) || interfaces.containsKey(name) ||
-                enums.containsKey(name) || moduleTypes.containsKey(name)) return;
+                enums.containsKey(name) || moduleTypes.containsKey(name) ||
+                functorTypes.containsKey(name)) return;
         throw new RuntimeException("Unknown type '" + name + "' in " + context);
     }
 
@@ -1073,6 +1115,12 @@ public class Interpreter {
                         !ModuleTypeChecker.matches(moduleTypes.get(module.signature), moduleTypes.get(typeName))) {
                         throw typeErr(typeName, value, what);
                     }
+                } else if (functorTypes.containsKey(typeName)) {
+                    if (!(value instanceof OwFunctor functor) ||
+                        !ModuleTypeChecker.matchesFunctor(functor.declaration,
+                                functorTypes.get(typeName), moduleTypes)) {
+                        throw typeErr(typeName, value, what);
+                    }
                 } else {
                     throw new RuntimeException("Unknown type '" + typeName + "' in " + what);
                 }
@@ -1086,6 +1134,7 @@ public class Interpreter {
     }
 
     private String typeNameOf(Object v) {
+        if (v instanceof OwFunctor f) return "functor " + f.declaration.name;
         if (v instanceof OwOpaque o) return "abstract " + o.typeIdentity;
         if (v instanceof OwModule m) return m.signature;
         if (v instanceof Integer) return "int";

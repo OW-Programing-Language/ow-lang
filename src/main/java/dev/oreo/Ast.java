@@ -14,6 +14,7 @@ public class Ast {
         public final List<ModuleTypeDecl> moduleTypes;
         public final List<ModuleDecl> modules;
         public final List<FunctorDecl> functors;
+        public final List<FunctorTypeDecl> functorTypes;
         public final List<Stmt> mainBody; // may be null in imported (non-entry) files
 
         public Program(List<String> imports,
@@ -32,6 +33,7 @@ public class Ast {
             this.moduleTypes = List.of();
             this.modules = List.of();
             this.functors = List.of();
+            this.functorTypes = List.of();
             this.mainBody = mainBody;
         }
 
@@ -45,6 +47,20 @@ public class Ast {
                        List<ModuleDecl> modules,
                        List<FunctorDecl> functors,
                        List<Stmt> mainBody) {
+            this(imports, functions, enums, interfaces, classes, models,
+                 moduleTypes, modules, functors, List.of(), mainBody);
+        }
+        public Program(List<String> imports,
+                       List<FnDecl> functions,
+                       List<EnumDecl> enums,
+                       List<InterfaceDecl> interfaces,
+                       List<ClassDecl> classes,
+                       List<ModelDecl> models,
+                       List<ModuleTypeDecl> moduleTypes,
+                       List<ModuleDecl> modules,
+                       List<FunctorDecl> functors,
+                       List<FunctorTypeDecl> functorTypes,
+                       List<Stmt> mainBody) {
             this.imports = imports;
             this.functions = functions;
             this.enums = enums;
@@ -54,6 +70,7 @@ public class Ast {
             this.moduleTypes = moduleTypes;
             this.modules = modules;
             this.functors = functors;
+            this.functorTypes = functorTypes;
             this.mainBody = mainBody;
         }
     }
@@ -96,6 +113,16 @@ public class Ast {
         }
     }
 
+    /** Signature of a higher-order functor value. */
+    public static class FunctorTypeDecl {
+        public final String name, inputSignature, outputSignature;
+        public FunctorTypeDecl(String name, String inputSignature, String outputSignature) {
+            this.name = name;
+            this.inputSignature = inputSignature;
+            this.outputSignature = outputSignature;
+        }
+    }
+
     /** Module-to-module functor with a checked input and output signature. */
     public static class FunctorDecl {
         public final String name, argument, inputSignature, outputSignature;
@@ -103,6 +130,7 @@ public class Ast {
         public final Map<String, String> typeAliases;
         public final boolean generative;
         public final Map<String, String> typeSharing;
+        public final String returnedFunctor;
         public FunctorDecl(String name, String argument, String inputSignature,
                            String outputSignature, List<MethodDecl> methods) {
             this(name, argument, inputSignature, outputSignature, methods, Map.of(), false);
@@ -122,6 +150,13 @@ public class Ast {
                            String outputSignature, List<MethodDecl> methods,
                            Map<String, String> typeAliases, boolean generative,
                            Map<String, String> typeSharing) {
+            this(name, argument, inputSignature, outputSignature,
+                 methods, typeAliases, generative, typeSharing, null);
+        }
+        public FunctorDecl(String name, String argument, String inputSignature,
+                           String outputSignature, List<MethodDecl> methods,
+                           Map<String, String> typeAliases, boolean generative,
+                           Map<String, String> typeSharing, String returnedFunctor) {
             this.name = name;
             this.argument = argument;
             this.inputSignature = inputSignature;
@@ -130,6 +165,7 @@ public class Ast {
             this.typeAliases = typeAliases;
             this.generative = generative;
             this.typeSharing = typeSharing;
+            this.returnedFunctor = returnedFunctor;
         }
     }
 

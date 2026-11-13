@@ -27,16 +27,17 @@ public final class Loader {
         List<Ast.ModuleTypeDecl> moduleTypes = new ArrayList<>();
         List<Ast.ModuleDecl> modules = new ArrayList<>();
         List<Ast.FunctorDecl> functors = new ArrayList<>();
+        List<Ast.FunctorTypeDecl> functorTypes = new ArrayList<>();
 
         Set<Path> visited = new HashSet<>();
         Deque<Path> active = new ArrayDeque<>();
-        List<Ast.Stmt> mainBody = collect(root, visited, fns, enums, interfaces, classes, models, moduleTypes, modules, functors, active, true);
+        List<Ast.Stmt> mainBody = collect(root, visited, fns, enums, interfaces, classes, models, moduleTypes, modules, functors, functorTypes, active, true);
 
         if (mainBody == null) {
             throw new RuntimeException("Program is missing a 'main:' block (entry file: " + root + ")");
         }
         return new Ast.Program(List.of(), fns, enums, interfaces, classes, models,
-                               moduleTypes, modules, functors, mainBody);
+                               moduleTypes, modules, functors, functorTypes, mainBody);
     }
 
     /** Loads an entry from in-memory source (e.g. an editor buffer), resolving
@@ -50,6 +51,7 @@ public final class Loader {
         List<Ast.ModuleTypeDecl> moduleTypes = new ArrayList<>();
         List<Ast.ModuleDecl> modules = new ArrayList<>();
         List<Ast.FunctorDecl> functors = new ArrayList<>();
+        List<Ast.FunctorTypeDecl> functorTypes = new ArrayList<>();
 
         Ast.Program entry = new Parser(new Lexer(src).lexAll()).parseProgram();
         Set<Path> visited = new HashSet<>();
@@ -59,7 +61,7 @@ public final class Loader {
             if (!Files.exists(target)) {
                 throw new RuntimeException("import not found: \"" + imp + "\"");
             }
-            collect(target, visited, fns, enums, interfaces, classes, models, moduleTypes, modules, functors, active, false);
+            collect(target, visited, fns, enums, interfaces, classes, models, moduleTypes, modules, functors, functorTypes, active, false);
         }
         fns.addAll(entry.functions);
         enums.addAll(entry.enums);
@@ -69,12 +71,13 @@ public final class Loader {
         moduleTypes.addAll(entry.moduleTypes);
         modules.addAll(entry.modules);
         functors.addAll(entry.functors);
+        functorTypes.addAll(entry.functorTypes);
 
         if (entry.mainBody == null) {
             throw new RuntimeException("Program is missing a 'main:' block");
         }
         return new Ast.Program(List.of(), fns, enums, interfaces, classes, models,
-                               moduleTypes, modules, functors, entry.mainBody);
+                               moduleTypes, modules, functors, functorTypes, entry.mainBody);
     }
 
     private static List<Ast.Stmt> collect(Path file, Set<Path> visited,
@@ -83,7 +86,8 @@ public final class Loader {
                                            List<Ast.ModelDecl> models,
                                            List<Ast.ModuleTypeDecl> moduleTypes,
                                            List<Ast.ModuleDecl> modules,
-                                           List<Ast.FunctorDecl> functors, Deque<Path> active,
+                                           List<Ast.FunctorDecl> functors,
+                                           List<Ast.FunctorTypeDecl> functorTypes, Deque<Path> active,
                                            boolean isEntry) throws IOException {
         Path norm = file.toAbsolutePath().normalize();
         if (active.contains(norm)) {
@@ -103,7 +107,7 @@ public final class Loader {
                 throw new RuntimeException(norm + ":" + line + ": import not found: \"" + imp + "\"");
             }
             checkImportBoundary(norm, target, line);
-            collect(target, visited, fns, enums, interfaces, classes, models, moduleTypes, modules, functors, active, false);
+            collect(target, visited, fns, enums, interfaces, classes, models, moduleTypes, modules, functors, functorTypes, active, false);
         }
 
         fns.addAll(prog.functions);
@@ -114,6 +118,7 @@ public final class Loader {
         moduleTypes.addAll(prog.moduleTypes);
         modules.addAll(prog.modules);
         functors.addAll(prog.functors);
+        functorTypes.addAll(prog.functorTypes);
 
         if (!isEntry && prog.mainBody != null) {
             throw new RuntimeException("imported file must not declare 'main': " + norm);

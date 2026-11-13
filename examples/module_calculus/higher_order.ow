@@ -1,0 +1,33 @@
+# Higher-order functors: a functor may accept or return a functor value.
+module_type SOURCE:
+  fn number() -> int
+
+module Source: SOURCE
+  fn number() -> int:
+    return: 7
+
+module_type RESULT:
+  fn get() -> int
+
+functor_type MAKER(SOURCE) -> RESULT
+
+functor Make(S: SOURCE) -> RESULT:
+  fn get() -> int:
+    return: S.number()
+
+functor Decorate(F: MAKER) -> RESULT:
+  fn get() -> int:
+    set base: F(Source)
+    return: base.get() + 1
+
+# A higher-order functor whose *result* is another functor.
+functor Identity(F: MAKER) -> MAKER:
+  return_functor: F
+
+main:
+  set d RESULT: Decorate(Make)
+  call: assert(d.get() == 8, "higher order parameter")
+  set chosen MAKER: Identity(Make)
+  set result RESULT: chosen(Source)
+  call: assert(result.get() == 7, "higher order result")
+  print: "PASS higher-order module functors"

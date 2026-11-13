@@ -332,3 +332,10 @@ source-path/line diagnostics. See [module boundaries](docs/module-boundaries.md)
 result module's abstract `token` to the input module's token identity.
 This is validated at load time and enforced at module call boundaries. See
 [dependent_result.ow](examples/module_calculus/dependent_result.ow).
+
+### Higher-order functors
+
+`functor_type MAKER(SOURCE) -> RESULT` declares a functor signature.
+`functor Decorate(F: MAKER) -> RESULT` can receive another functor; a
+functor returning `MAKER` uses `return_functor: F` to expose a compatible
+functor value. See [higher_order.ow](examples/module_calculus/higher_order.ow).
