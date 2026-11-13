@@ -30,3 +30,20 @@ This is a meaningful native **first stage** of issue #16, not full OCaml parity.
 Abstract type members, opaque type equality, sharing constraints, generativity,
 applicative module identity, higher-order functors, and rich source-span
 diagnostics remain future work.
+
+## Advanced OCaml-inspired module feature integration
+
+[advanced_module_calculus.ow](advanced_module_calculus.ow) is a **standalone
+OW language** sample (it does not import flOW). It composes:
+
+- Lexically nested `module` and `module_type`, with public signature sealing;
+- Implementation-level `include` and transparent module re-exports;
+- A typed functor consuming a module with an exported nested module;
+- First-class `pack`/`unpack` values stored inside arrays and records.
+
+Run `ow check examples/module_calculus/advanced_module_calculus.ow` and
+`ow run examples/module_calculus/advanced_module_calculus.ow`.
+
+For AOT LLVM output from the **static integer subset**, use the separate
+[native_llvm.ow](native_llvm.ow) fixture. General dynamic packages and
+abstract module type values do not yet lower to native code.

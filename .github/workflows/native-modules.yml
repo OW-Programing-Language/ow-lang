@@ -72,6 +72,11 @@ jobs:
         run: |
           java -jar target/OwIDE.jar check examples/module_calculus/lexical_nested_modules.ow
           java -jar target/OwIDE.jar run examples/module_calculus/lexical_nested_modules.ow
+      - name: Advanced OW module calculus composition (no flOW dependency)
+        run: |
+          java -jar target/OwIDE.jar check examples/module_calculus/advanced_module_calculus.ow
+          java -jar target/OwIDE.jar run examples/module_calculus/advanced_module_calculus.ow | tee /tmp/ow-advanced.log
+          grep -F 'PASS advanced OW module calculus' /tmp/ow-advanced.log
       - name: Reject malformed modules, functor arguments, and hidden exports
         run: |
           for file in tests/module_calculus_*.ow tests/module_abstract_*.ow tests/module_functor_generative_mismatch.ow tests/module_manifest_mismatch.ow tests/module_dependent_*.ow tests/module_higher_order_*.ow tests/module_named_type_*.ow tests/module_set_make_*.ow; do

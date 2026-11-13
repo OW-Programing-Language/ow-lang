@@ -1,0 +1,58 @@
+# OW module calculus: four advanced features working together.
+# This example runs in OW's interpreter; the statically resolved integer
+# subset can also be compiled with 'ow llvm' (see native_llvm.ow).
+
+module_type COUNTER:
+  fn next(value int) -> int
+
+module BaseCounter: COUNTER
+  fn next(value int) -> int:
+    return: value + 2
+
+# Implementation include retains the original module's exports.
+module DecoratedCounter: COUNTER
+  include BaseCounter
+
+module_type CATALOG:
+  module Public: COUNTER
+  fn calculate(value int) -> int
+
+# Lexically nested modules and a locally scoped module_type.
+module Catalog: CATALOG
+  module_type PRIVATE_API:
+    fn offset() -> int
+
+  module Public: COUNTER
+    include DecoratedCounter
+
+  module Hidden: PRIVATE_API
+    fn offset() -> int:
+      return: 3
+
+  fn calculate(value int) -> int:
+    return: Public.next(value) + Hidden.offset()
+
+module_type RESULT:
+  fn total(value int) -> int
+
+# The functor uses a typed module parameter with nested public exports.
+functor Score(C: CATALOG) -> RESULT:
+  fn total(value int) -> int:
+    return: C.calculate(value)
+
+main:
+  set scores RESULT: Score(Catalog)
+  call: assert(scores.total(10) == 15, "typed nested functor")
+
+  # A first-class sealed package survives storage in arrays and records.
+  set packaged: pack(Catalog.Public, "COUNTER")
+  set modules: [packaged]
+  set container: {active: modules}
+  set restored COUNTER: unpack(container.active[0], "COUNTER")
+  call: assert(restored.next(5) == 7, "sealed module unpack")
+
+  # Catalog.Hidden is deliberately not exposed by CATALOG and cannot
+  # be accessed by consumers, but Catalog.calculate can use it.
+  call: assert(Catalog.calculate(5) == 10, "private lexical child")
+
+  print: "PASS advanced OW module calculus"
