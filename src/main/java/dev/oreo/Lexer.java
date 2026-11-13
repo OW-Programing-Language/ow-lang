@@ -18,23 +18,37 @@ public class Lexer {
         public final Type type;
         public final String text;
         public final int line;
+        public final int column;
+        public final int endColumn;
+        public final String source;
 
         public Token(Type type, String text, int line) {
+            this(type, text, line, -1, -1, "<source>");
+        }
+        public Token(Type type, String text, int line, int column,
+                     int endColumn, String source) {
             this.type = type;
             this.text = text;
             this.line = line;
+            this.column = column;
+            this.endColumn = endColumn;
+            this.source = source;
         }
 
         @Override public String toString() {
-            return type + "(" + text + ")@" + line;
+            return type + "(" + text + ")@" + source + ":" + line + ":" + column;
         }
     }
 
     private final String[] lines;
+    private final String sourceName;
 
-    public Lexer(String src) {
+    public Lexer(String src) { this(src, "<source>"); }
+
+    public Lexer(String src, String sourceName) {
         String normalized = src.replace("\r\n", "\n").replace('\r', '\n');
         this.lines = normalized.split("\n", -1);
+        this.sourceName = sourceName == null ? "<source>" : sourceName;
     }
 
     public List<Token> lexAll() {
@@ -68,7 +82,31 @@ public class Lexer {
                 }
             }
 
-            lexLine(stripped.substring(leadingSpaces), lineNo, out);
+            int tokenStart = out.size();
+            String visible = stripped.substring(leadingSpaces);
+            lexLine(visible, lineNo, out);
+            int cursor = 0;
+            for (int j = tokenStart; j < out.size(); j++) {
+                Token token = out.get(j);
+                int start = token.type == Type.STRING
+                        ? visible.indexOf('"', cursor)
+                        : visible.indexOf(token.text, cursor);
+                if (start < 0) start = cursor;
+                int end = start + token.text.length();
+                if (token.type == Type.STRING) {
+                    end = start + 1;
+                    while (end < visible.length()) {
+                        if (visible.charAt(end) == '\\' && end + 1 < visible.length()) {
+                            end += 2;
+                            continue;
+                        }
+                        if (visible.charAt(end++) == '"') break;
+                    }
+                }
+                out.set(j, new Token(token.type, token.text, lineNo,
+                        leadingSpaces + start + 1, leadingSpaces + end + 1, sourceName));
+                cursor = end;
+            }
             out.add(new Token(Type.NEWLINE, "", lineNo));
         }
 

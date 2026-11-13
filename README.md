@@ -351,3 +351,10 @@ remain guarded by runtime checks. See [native module checks](docs/native-modules
 
 `module Alias: BOX with_type token = First.token` shares an opaque type identity
 between named modules. See [named type sharing](examples/module_calculus/named_type_sharing.ow).
+
+## OCaml OrderedType / Set.Make comparison
+
+[examples/module_calculus/set_make.ow](examples/module_calculus/set_make.ow)
+shows a typed Order module and a MakeSet functor with an abstract element
+identity, executable membership and add operations, and negative fixtures.
+Compiler diagnostics now carry file/line/column spans for module type errors.

@@ -1,0 +1,26 @@
+module_type ORDERED:
+  type t
+  fn make(v int) -> t
+  fn compare(a t, b t) -> int
+module IntOrdered: ORDERED
+  type t: int
+  fn make(v int) -> t:
+    return: v
+  fn compare(a t, b t) -> int:
+    return: a - b
+module OtherOrdered: ORDERED
+  type t: int
+  fn make(v int) -> t:
+    return: v
+  fn compare(a t, b t) -> int:
+    return: a - b
+module_type SET:
+  type element
+  fn accept(v element) -> int
+functor MakeSet(O: ORDERED) -> SET with_type element = O.t:
+  type element: O.t
+  fn accept(v element) -> int:
+    return: 1
+main:
+  set SetA: MakeSet(IntOrdered)
+  print: SetA.accept(OtherOrdered.make(3))
