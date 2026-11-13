@@ -22,6 +22,7 @@ public final class NativeModuleLlvmLowerer {
 
     private record Instance(String id, String signature,
                             Map<String, Ast.MethodDecl> exports,
+                            Map<String, String> typeAliases,
                             Map<String, Instance> captured) {}
 
     private NativeModuleLlvmLowerer(Ast.Program program) {
@@ -33,7 +34,8 @@ public final class NativeModuleLlvmLowerer {
             Map<String, Ast.MethodDecl> methods = new LinkedHashMap<>();
             for (Ast.MethodDecl method : module.methods) methods.put(method.name, method);
             globalModules.put(module.name,
-                    new Instance(module.name, module.signature, methods, Map.of()));
+                    new Instance(module.name, module.signature, methods,
+                                 module.typeAliases, Map.of()));
         }
         Map<String, String> aliases = ModuleTypeChecker.resolvedAliases(source);
         for (Map.Entry<String, String> alias : aliases.entrySet()) {
@@ -140,15 +142,16 @@ public final class NativeModuleLlvmLowerer {
 
     private String materialize(Instance module, String name) {
         Ast.ModuleTypeDecl signature = signatures.get(module.signature);
-        if (signature == null || !signature.abstractTypes.isEmpty())
-            throw unsupported("module " + module.id + " requires abstract type lowering");
+        if (signature == null)
+            throw unsupported("unknown module signature for " + module.id);
         Ast.MethodSig exposed = signature.methods.stream()
                 .filter(method -> method.name.equals(name)).findFirst().orElse(null);
         if (exposed == null)
             throw unsupported("method " + module.id + "." + name + " is not public");
-        if (!"int".equals(exposed.returnType) ||
-            exposed.paramTypes.stream().anyMatch(t -> !"int".equals(t)))
-            throw unsupported("only int method signatures are supported: " + module.id + "." + name);
+        if (!i32Compatible(module, exposed.returnType) ||
+            exposed.paramTypes.stream().anyMatch(t -> !i32Compatible(module, t)))
+            throw unsupported("only i32-representable module signatures are supported: " +
+                              module.id + "." + name);
         Ast.MethodDecl impl = module.exports.get(name);
         if (impl == null) throw unsupported("module method missing " + module.id + "." + name);
 
@@ -188,9 +191,42 @@ public final class NativeModuleLlvmLowerer {
         for (Ast.MethodDecl method : functor.methods) methods.put(method.name, method);
         String id = functor.generative ? key + "#" + (++serial) : key;
         Instance instance = new Instance(id, functor.outputSignature, methods,
-                Map.of(functor.argument, argument));
+                functor.typeAliases, Map.of(functor.argument, argument));
         if (!functor.generative) applicativeInstances.put(key, instance);
         return instance;
+    }
+
+    /**
+     * Erase a proven abstract type to i32 for this *statically monomorphized*
+     * instance. The semantic checker runs before lowering and retains nominal
+     * type identities, so only the representation disappears in generated IR.
+     * Dynamic packaging/dispatch is still explicitly unsupported.
+     */
+    private boolean i32Compatible(Instance instance, String type) {
+        return resolveRepresentation(instance, type, new LinkedHashSet<>()).equals("int");
+    }
+
+    private String resolveRepresentation(Instance instance, String type,
+                                         Set<String> active) {
+        if (type == null) return "<unknown>";
+        if (!signatures.containsKey(instance.signature))
+            throw unsupported("unknown signature " + instance.signature);
+        if (!signatures.get(instance.signature).abstractTypes.contains(type)) return type;
+        String key = instance.id + "." + type;
+        if (!active.add(key))
+            throw unsupported("cyclic abstract representation " + active + " -> " + key);
+        String representation = instance.typeAliases.get(type);
+        if (representation == null)
+            throw unsupported("missing abstract representation " + key);
+        if (representation.contains(".")) {
+            String[] parts = representation.split("\\.", 2);
+            Instance target = instance.captured.get(parts[0]);
+            if (target == null) target = globalModules.get(parts[0]);
+            if (target == null)
+                throw unsupported("unresolved abstract type path " + representation);
+            return resolveRepresentation(target, parts[1], active);
+        }
+        return representation;
     }
 
     private static String staticPath(Ast.Expr expr) {
