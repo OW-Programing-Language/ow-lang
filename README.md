@@ -358,3 +358,7 @@ between named modules. See [named type sharing](examples/module_calculus/named_t
 shows a typed Order module and a MakeSet functor with an abstract element
 identity, executable membership and add operations, and negative fixtures.
 Compiler diagnostics now carry file/line/column spans for module type errors.
+
+**Compile-time validation:** `ow check examples/module_calculus/set_make.ow`
+checks module signatures and abstract types before execution. The LLVM backend
+remains procedural-only and rejects native module code explicitly.

@@ -22,6 +22,14 @@ public class Main {
                 runFile(Path.of(args[1]));
             }
 
+            case "check", "--check" -> {
+                requireFile(args, "check");
+                Ast.Program program = Loader.load(Path.of(args[1]));
+                ModuleTypeChecker.check(program);
+                System.out.println("OW module type check passed: " +
+                                   Path.of(args[1]).toAbsolutePath());
+            }
+
             case "build" -> {
                 requireFile(args, "build");
                 Path in = Path.of(args[1]);
@@ -95,7 +103,8 @@ public class Main {
                 Usage:
                   ow <file.ow>          Run a program (interpreter)
                   ow run <file.ow>      Run a program (interpreter)
-                  ow build <file> [out] Compile to a native .exe (procedural subset; needs LLVM/Zig)
+                  ow check <file.ow>    Validate module/functor types without executing main
+                  ow build <file> [out] Compile procedural programs (needs LLVM/Zig)
                   ow package <file>     Bundle an app/game into a launchable .exe + installer
                                         [--name N] [--type gui|console|web] [--out dir] [--icon x.ico]
                   ow ide                Launch OwIDE
