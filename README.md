@@ -294,7 +294,8 @@ restricted by the declared signature.
 Try [the module calculus example](examples/module_calculus/README.md), and
 read [the implementation and limitations](docs/native-modules.md). These
 features advance [issue #16](https://github.com/OW-Programing-Language/ow-lang/issues/16),
-but abstract types, sharing constraints and generativity remain outstanding.
+and these capabilities now have tested implementations for the documented OW
+subset; full OCaml type inference and native code generation remain open.
 
 ### Opaque module type members
 
@@ -303,7 +304,8 @@ but abstract types, sharing constraints and generativity remain outstanding.
 The runtime seals the concrete integer into an opaque module-specific value,
 preventing callers from mixing values from different BOX modules. Try
 [abstract_types.ow](examples/module_calculus/abstract_types.ow). Type sharing
-constraints and generative/applicative identities are still being developed.
+and generative/applicative identities are supported for a tested subset of
+statically known module paths.
 
 ### Applicative and generative functors
 
@@ -360,5 +362,28 @@ identity, executable membership and add operations, and negative fixtures.
 Compiler diagnostics now carry file/line/column spans for module type errors.
 
 **Compile-time validation:** `ow check examples/module_calculus/set_make.ow`
-checks module signatures and abstract types before execution. The LLVM backend
-remains procedural-only and rejects native module code explicitly.
+checks module signatures and abstract types before execution.
+
+### Advanced modules, first-class packages and LLVM
+
+OW now supports a tested **subset** of OCaml-style module facilities:
+named lexically nested modules and signatures with export sealing, public
+implementation-level `include`, and first-class module packages via
+`pack(module, "SIGNATURE")` / `unpack(package, "SIGNATURE")`.
+These work together in
+[advanced_module_calculus.ow](examples/module_calculus/advanced_module_calculus.ow).
+
+```sh
+ow check examples/module_calculus/advanced_module_calculus.ow
+ow run examples/module_calculus/advanced_module_calculus.ow
+```
+
+The LLVM backend also compiles **statically resolvable, integer-only**
+module/functor applications into native code via `ow llvm` or `ow build`.
+See [native_llvm.ow](examples/module_calculus/native_llvm.ow).
+Dynamic first-class packages, general abstract types, higher-order module
+values and other advanced semantics remain interpreter-only; OW is not
+fully equivalent to OCaml.
+
+See the [feature details and current limitations](docs/native-modules.md),
+and the open [parity checklist (#16)](https://github.com/OW-Programing-Language/ow-lang/issues/16).
