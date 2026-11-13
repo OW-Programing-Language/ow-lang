@@ -319,3 +319,9 @@ public, unlike a sealed `type token`. Modules must agree on the concrete type
 and can exchange values safely across this shared interface. This covers
 manifest type sharing, not OCaml's complete `with type` path equations.
 See [manifest_sharing.ow](examples/module_calculus/manifest_sharing.ow).
+
+## Compiler-enforced api/infra boundaries
+
+OW now rejects imports from another business module's `infra/` directory and
+rejects `api/` imports of `infra/`. Import cycles and missing imports produce
+source-path/line diagnostics. See [module boundaries](docs/module-boundaries.md).

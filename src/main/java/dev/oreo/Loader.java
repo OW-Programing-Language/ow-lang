@@ -29,7 +29,8 @@ public final class Loader {
         List<Ast.FunctorDecl> functors = new ArrayList<>();
 
         Set<Path> visited = new HashSet<>();
-        List<Ast.Stmt> mainBody = collect(root, visited, fns, enums, interfaces, classes, models, moduleTypes, modules, functors, true);
+        Deque<Path> active = new ArrayDeque<>();
+        List<Ast.Stmt> mainBody = collect(root, visited, fns, enums, interfaces, classes, models, moduleTypes, modules, functors, active, true);
 
         if (mainBody == null) {
             throw new RuntimeException("Program is missing a 'main:' block (entry file: " + root + ")");
@@ -52,12 +53,13 @@ public final class Loader {
 
         Ast.Program entry = new Parser(new Lexer(src).lexAll()).parseProgram();
         Set<Path> visited = new HashSet<>();
+        Deque<Path> active = new ArrayDeque<>();
         for (String imp : entry.imports) {
             Path target = baseDir.resolve(imp).normalize();
             if (!Files.exists(target)) {
                 throw new RuntimeException("import not found: \"" + imp + "\"");
             }
-            collect(target, visited, fns, enums, interfaces, classes, models, moduleTypes, modules, functors, false);
+            collect(target, visited, fns, enums, interfaces, classes, models, moduleTypes, modules, functors, active, false);
         }
         fns.addAll(entry.functions);
         enums.addAll(entry.enums);
@@ -81,9 +83,14 @@ public final class Loader {
                                            List<Ast.ModelDecl> models,
                                            List<Ast.ModuleTypeDecl> moduleTypes,
                                            List<Ast.ModuleDecl> modules,
-                                           List<Ast.FunctorDecl> functors, boolean isEntry) throws IOException {
+                                           List<Ast.FunctorDecl> functors, Deque<Path> active,
+                                           boolean isEntry) throws IOException {
         Path norm = file.toAbsolutePath().normalize();
+        if (active.contains(norm)) {
+            throw new RuntimeException("Import cycle: " + active + " -> " + norm);
+        }
         if (!visited.add(norm)) return null; // already loaded
+        active.addLast(norm);
 
         String src = Files.readString(norm, StandardCharsets.UTF_8);
         Ast.Program prog = new Parser(new Lexer(src).lexAll()).parseProgram();
@@ -91,10 +98,12 @@ public final class Loader {
         // Load imports first (depth-first), resolved relative to this file.
         for (String imp : prog.imports) {
             Path target = norm.getParent().resolve(imp).normalize();
+            int line = sourceImportLine(src, imp);
             if (!Files.exists(target)) {
-                throw new RuntimeException("import not found: \"" + imp + "\" (from " + norm + ")");
+                throw new RuntimeException(norm + ":" + line + ": import not found: \"" + imp + "\"");
             }
-            collect(target, visited, fns, enums, interfaces, classes, models, moduleTypes, modules, functors, false);
+            checkImportBoundary(norm, target, line);
+            collect(target, visited, fns, enums, interfaces, classes, models, moduleTypes, modules, functors, active, false);
         }
 
         fns.addAll(prog.functions);
@@ -109,6 +118,45 @@ public final class Loader {
         if (!isEntry && prog.mainBody != null) {
             throw new RuntimeException("imported file must not declare 'main': " + norm);
         }
+        active.removeLast();
         return prog.mainBody;
+    }
+
+    private record Domain(String root, String zone) {}
+
+    /**
+     * A conventional business module contains api/ and infra/ source folders.
+     * The app composition root may import infra; members of one business module
+     * may only import other modules' public APIs. API code may not import infra.
+     */
+    private static Domain domainOf(Path file) {
+        Path absolute = file.toAbsolutePath().normalize();
+        for (int i = 0; i + 2 < absolute.getNameCount(); i++) {
+            String zone = absolute.getName(i + 1).toString();
+            if (zone.equals("api") || zone.equals("infra")) {
+                return new Domain(absolute.subpath(0, i + 1).toString(), zone);
+            }
+        }
+        return null;
+    }
+
+    private static void checkImportBoundary(Path source, Path target, int line) {
+        Domain origin = domainOf(source);
+        Domain destination = domainOf(target);
+        if (origin == null || destination == null || !destination.zone.equals("infra")) return;
+        if (origin.zone.equals("api") || !origin.root.equals(destination.root)) {
+            throw new RuntimeException(source + ":" + line +
+                    ": module boundary violation: cannot import implementation " + target +
+                    " from " + origin.zone + "; import the target module's api/ instead");
+        }
+    }
+
+    private static int sourceImportLine(String source, String imported) {
+        String[] lines = source.split("\\n", -1);
+        String needle = "import \"" + imported + "\"";
+        for (int i = 0; i < lines.length; i++) {
+            if (lines[i].strip().equals(needle)) return i + 1;
+        }
+        return 1;
     }
 }
