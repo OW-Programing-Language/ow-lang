@@ -62,13 +62,20 @@ public class Ast {
         }
     }
 
-    /** A method signature with no body (used by interfaces). */
+    /** Interface methods may declare optional parameter/return types. */
     public static class MethodSig {
         public final String name;
         public final List<String> params;
+        public final List<String> paramTypes;
+        public final String returnType;
         public MethodSig(String name, List<String> params) {
+            this(name, params, Collections.nCopies(params.size(), null), null);
+        }
+        public MethodSig(String name, List<String> params, List<String> paramTypes, String returnType) {
             this.name = name;
             this.params = params;
+            this.paramTypes = paramTypes;
+            this.returnType = returnType;
         }
     }
 
@@ -98,11 +105,19 @@ public class Ast {
         public final String name;
         public final boolean isPrivate;
         public final List<String> params;
+        public final List<String> paramTypes;
+        public final String returnType;
         public final List<Stmt> body;
         public MethodDecl(String name, boolean isPrivate, List<String> params, List<Stmt> body) {
+            this(name, isPrivate, params, Collections.nCopies(params.size(), null), null, body);
+        }
+        public MethodDecl(String name, boolean isPrivate, List<String> params,
+                          List<String> paramTypes, String returnType, List<Stmt> body) {
             this.name = name;
             this.isPrivate = isPrivate;
             this.params = params;
+            this.paramTypes = paramTypes;
+            this.returnType = returnType;
             this.body = body;
         }
     }

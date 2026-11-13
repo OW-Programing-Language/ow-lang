@@ -253,3 +253,33 @@ Prebuilt OwIDE jars and Windows installers are published on the
 ## License
 
 [MIT](LICENSE).
+
+## Interface conformance validation
+
+Ow now verifies interface declarations **before executing `main`**. A class
+that declares `class C(Shape)` must implement all public methods listed in
+`interface Shape`, with the expected number of arguments. Missing members,
+private implementations, wrong arity, unknown parent types, and inheritance
+cycles produce errors before program execution. Inherited public methods count.
+
+This strengthens module contracts used by the companion
+[flOW framework](https://github.com/OW-Programing-Language/flOW---OW-Modular-Framework).
+
+**Typed method signatures:** Add optional parameter and return annotations in
+interfaces and class methods:
+
+```ow
+interface Storage:
+  fn put(key string, value int) -> bool
+class MemoryStorage(Storage):
+  fn put(key string, value int) -> bool:
+    return: true
+```
+
+OW rejects mismatched parameter or return types and unknown type names before
+`main`, and checks actual arguments and results at method call boundaries. Annotations are
+optional, so existing OW programs continue working.
+
+**Current limit:** This validates explicitly declared method signatures at
+interpreter load time. It is not an OCaml module compiler, abstract type system
+or full static inference engine.

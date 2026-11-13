@@ -129,6 +129,9 @@ public class Interpreter {
             models.put(m.name, m);
             db.put(m.name, new ArrayList<>());
         }
+        // A class may declare an interface only if it supplies every public
+        // method with the required arity. Validate before running any main code.
+        validateInterfaceImplementations();
         if (!models.isEmpty()) loadDb();
         if (program.mainBody == null) {
             throw new RuntimeException("Program is missing a 'main:' block");
@@ -518,14 +521,120 @@ public class Interpreter {
         Map<String, Object> local = new HashMap<>();
         local.put("this", obj);
         for (int i = 0; i < m.params.size(); i++) {
+            String parameterType = m.paramTypes.get(i);
+            if (parameterType != null) {
+                checkType(parameterType, args.get(i), "argument " + (i + 1) + " of " + m.name);
+            }
             local.put(m.params.get(i), args.get(i));
         }
+        Object result = 0;
         try {
             execBlock(m.body, local);
         } catch (ReturnSignal rs) {
-            return rs.value;
+            result = rs.value;
         }
-        return 0;
+        if (m.returnType != null) {
+            checkType(m.returnType, result, "return value of " + m.name);
+        }
+        return result;
+    }
+
+    /** Ensure typed OW declarations only refer to known primitives or loaded types. */
+    private void requireKnownType(String name, String context) {
+        if (name == null) return;
+        if (Set.of("int", "string", "str", "bool", "boolean", "array", "list", "float", "double")
+                .contains(name)) return;
+        if (classes.containsKey(name) || interfaces.containsKey(name) || enums.containsKey(name)) return;
+        throw new RuntimeException("Unknown type '" + name + "' in " + context);
+    }
+
+    /** Reject invalid interface implementations before evaluating the program.
+     * OW's interface signatures currently specify method names and arity only;
+     * parameter/return type matching is not yet part of the OW grammar.
+     */
+    private void validateInterfaceImplementations() {
+        // Reject typos in signatures even if the method is never called.
+        for (Ast.InterfaceDecl iface : interfaces.values()) {
+            for (Ast.MethodSig method : iface.methods) {
+                for (String type : method.paramTypes) requireKnownType(type, iface.name + "." + method.name);
+                requireKnownType(method.returnType, iface.name + "." + method.name);
+            }
+        }
+        for (Ast.ClassDecl cls : classes.values()) {
+            for (Ast.MethodDecl method : cls.methods) {
+                for (String type : method.paramTypes) requireKnownType(type, cls.name + "." + method.name);
+                requireKnownType(method.returnType, cls.name + "." + method.name);
+            }
+        }
+        Set<String> verified = new HashSet<>();
+        for (Ast.ClassDecl cls : classes.values()) {
+            checkInheritance(cls, new HashSet<>(), verified);
+        }
+        for (Ast.ClassDecl cls : classes.values()) {
+            for (Ast.ClassDecl ancestor : classChain(cls)) {
+                for (String superName : ancestor.supers) {
+                    Ast.InterfaceDecl iface = interfaces.get(superName);
+                    if (iface == null) continue;
+                    Set<String> names = new HashSet<>();
+                    for (Ast.MethodSig required : iface.methods) {
+                        if (!names.add(required.name)) {
+                            throw new RuntimeException("Interface " + iface.name +
+                                    " declares duplicate method " + required.name);
+                        }
+                        Ast.MethodDecl provided = findMethod(cls, required.name);
+                        if (provided == null) {
+                            throw new RuntimeException("Class " + cls.name +
+                                    " does not implement " + iface.name + "." + required.name +
+                                    "/" + required.params.size());
+                        }
+                        if (provided.isPrivate) {
+                            throw new RuntimeException("Class " + cls.name + "." +
+                                    provided.name + " is private but required publicly by " + iface.name);
+                        }
+                        if (provided.params.size() != required.params.size()) {
+                            throw new RuntimeException("Class " + cls.name + "." +
+                                    required.name + " takes " + provided.params.size() +
+                                    " argument(s), but " + iface.name + " requires " +
+                                    required.params.size());
+                        }
+                        for (int a = 0; a < required.params.size(); a++) {
+                            String expectedType = required.paramTypes.get(a);
+                            if (expectedType != null && !expectedType.equals(provided.paramTypes.get(a))) {
+                                throw new RuntimeException("Class " + cls.name + "." +
+                                        required.name + " parameter " + (a + 1) +
+                                        " must be " + expectedType + " for " + iface.name);
+                            }
+                        }
+                        if (required.returnType != null &&
+                                !required.returnType.equals(provided.returnType)) {
+                            throw new RuntimeException("Class " + cls.name + "." +
+                                    required.name + " must return " + required.returnType +
+                                    " for " + iface.name);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /** Detect invalid or cyclic class inheritance before walking class chains. */
+    private void checkInheritance(Ast.ClassDecl cls, Set<String> visiting,
+                                   Set<String> visited) {
+        if (visited.contains(cls.name)) return;
+        if (!visiting.add(cls.name)) {
+            throw new RuntimeException("Cyclic class inheritance at " + cls.name);
+        }
+        for (String parentName : cls.supers) {
+            Ast.ClassDecl parentClass = classes.get(parentName);
+            if (parentClass != null) {
+                checkInheritance(parentClass, visiting, visited);
+            } else if (!interfaces.containsKey(parentName)) {
+                throw new RuntimeException("Class " + cls.name +
+                        " extends unknown class or interface " + parentName);
+            }
+        }
+        visiting.remove(cls.name);
+        visited.add(cls.name);
     }
 
     /** The class and its superclass chain (interfaces are skipped — they carry no state/behaviour). */
@@ -720,6 +829,10 @@ public class Interpreter {
             case "array", "list" -> {
                 if (!(value instanceof List<?>)) throw typeErr(typeName, value, what);
             }
+            case "float", "double" -> {
+                if (!(value instanceof Double) && !(value instanceof Integer))
+                    throw typeErr(typeName, value, what);
+            }
             default -> {
                 if (enums.containsKey(typeName)) {
                     if (!(value instanceof OwEnumValue ev) || !ev.enumName.equals(typeName))
@@ -728,7 +841,9 @@ public class Interpreter {
                     if (!(value instanceof OwObject obj) || !classMatchesType(obj.cls, typeName))
                         throw typeErr(typeName, value, what);
                 }
-                // unknown type name: no runtime check
+                else {
+                    throw new RuntimeException("Unknown type '" + typeName + "' in " + what);
+                }
             }
         }
     }

@@ -1,0 +1,21 @@
+# This deliberately gives MakeSorter an object without Ordered.
+# It MUST fail with a typed argument error.
+interface Ordered:
+  fn compare(a int, b int) -> int
+interface Sorter:
+  fn smallest(a int, b int) -> int
+interface SorterFunctor:
+  fn make(order Ordered) -> Sorter
+class Wrong:
+  fn new():
+    return: 0
+class Result(Sorter):
+  fn smallest(a int, b int) -> int:
+    return: a
+class MakeSorter(SorterFunctor):
+  fn make(order Ordered) -> Sorter:
+    return: new Result()
+main:
+  set functor: new MakeSorter()
+  set result: functor.make(new Wrong())
+  print: "FAIL: wrongly accepted an invalid module"
