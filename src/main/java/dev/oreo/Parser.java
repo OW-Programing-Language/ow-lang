@@ -143,9 +143,17 @@ public class Parser {
         Map<String, String> manifestTypes = new LinkedHashMap<>();
         List<Ast.MethodSig> methods = new ArrayList<>();
         List<String> includes = new ArrayList<>();
+        Map<String, String> nestedModules = new LinkedHashMap<>();
         while (!check(Type.DEDENT) && !check(Type.EOF)) {
             if (check(Type.NEWLINE)) { p++; continue; }
-            if (matchIdent("include")) {
+            if (matchIdent("module")) {
+                String child = expect(Type.IDENT).text;
+                expect(Type.COLON);
+                String required = parseQualifiedModuleName();
+                expect(Type.NEWLINE);
+                if (nestedModules.putIfAbsent(child, required) != null)
+                    throw err("duplicate nested signature member " + child);
+            } else if (matchIdent("include")) {
                 includes.add(parseQualifiedModuleName());
                 expect(Type.NEWLINE);
             } else if (matchIdent("type")) {
@@ -163,12 +171,12 @@ public class Parser {
                 methods.add(new Ast.MethodSig(method.text, params.names, params.types,
                                               result, Ast.SourceSpan.from(method)));
             } else {
-                throw err("module_type expects 'include', 'type' or 'fn' declaration");
+                throw err("module_type expects 'module', 'include', 'type' or 'fn' declaration");
             }
         }
         expect(Type.DEDENT);
         return new Ast.ModuleTypeDecl(name, methods, abstractTypes, manifestTypes,
-                                      includes, Ast.SourceSpan.from(nameToken));
+                                      includes, nestedModules, Ast.SourceSpan.from(nameToken));
     }
 
     // module Alias = Warehouse or module Shop.Inventory = Warehouse
@@ -207,7 +215,9 @@ public class Parser {
         if (members.returnedFunctor != null)
             throw err("module may not return a functor");
         return new Ast.ModuleDecl(name, signature, members.methods, members.typeAliases,
-                                  sharing, members.includes, Ast.SourceSpan.from(nameToken));
+                                  sharing, members.includes, members.nestedModules,
+                                  members.nestedSignatures, Map.of(),
+                                  Ast.SourceSpan.from(nameToken));
     }
 
     // functor_type FACTORY(INPUT) -> OUTPUT
@@ -247,6 +257,8 @@ public class Parser {
         }
         expect(Type.COLON);
         ModuleMembers members = parseModuleMethods();
+        if (!members.nestedModules.isEmpty() || !members.nestedSignatures.isEmpty())
+            throw err("lexical nested module declarations inside functors are not yet supported");
         return new Ast.FunctorDecl(name, argument, input, output,
                                    members.methods, members.typeAliases, generative,
                                    sharing, members.returnedFunctor, members.includes,
@@ -266,7 +278,9 @@ public class Parser {
     }
 
     private record ModuleMembers(List<Ast.MethodDecl> methods, Map<String, String> typeAliases,
-                                 List<String> includes, String returnedFunctor) {}
+                                 List<String> includes, List<Ast.ModuleDecl> nestedModules,
+                                 List<Ast.ModuleTypeDecl> nestedSignatures,
+                                 String returnedFunctor) {}
 
     private ModuleMembers parseModuleMethods() {
         expect(Type.NEWLINE);
@@ -274,12 +288,18 @@ public class Parser {
         List<Ast.MethodDecl> methods = new ArrayList<>();
         Map<String, String> typeAliases = new LinkedHashMap<>();
         List<String> includes = new ArrayList<>();
+        List<Ast.ModuleDecl> nestedModules = new ArrayList<>();
+        List<Ast.ModuleTypeDecl> nestedSignatures = new ArrayList<>();
         String returnedFunctor = null;
         while (!check(Type.DEDENT) && !check(Type.EOF)) {
             if (check(Type.NEWLINE)) { p++; continue; }
             if (matchIdent("include")) {
                 includes.add(parseQualifiedModuleName());
                 expect(Type.NEWLINE);
+            } else if (matchIdent("module_type")) {
+                nestedSignatures.add(parseModuleType());
+            } else if (matchIdent("module")) {
+                nestedModules.add(parseModule());
             } else if (matchIdent("type")) {
                 String name = expect(Type.IDENT).text;
                 expect(Type.COLON);
@@ -296,11 +316,12 @@ public class Parser {
                 returnedFunctor = expect(Type.IDENT).text;
                 expect(Type.NEWLINE);
             } else {
-                throw err("module body expects 'include', 'type', 'fn' or 'return_functor' declarations");
+                throw err("module body expects 'module', 'module_type', 'include', 'type', 'fn' or 'return_functor' declarations");
             }
         }
         expect(Type.DEDENT);
-        return new ModuleMembers(methods, typeAliases, includes, returnedFunctor);
+        return new ModuleMembers(methods, typeAliases, includes, nestedModules, nestedSignatures,
+                                 returnedFunctor);
     }
 
     // class Name[(Super, Iface...)]:

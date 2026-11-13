@@ -13,6 +13,7 @@ public final class StaticModuleValueChecker {
     private final Map<String, Ast.ModuleTypeDecl> signatures;
     private final Map<String, Ast.FunctorDecl> functors = new HashMap<>();
     private final Map<String, ModuleRef> moduleValues = new HashMap<>();
+    private final Map<String, Ast.ModuleDecl> lexicalOwners = new HashMap<>();
     private final Map<String, PackedRef> packedValues = new HashMap<>();
     private final Map<String, ValueType> valueTypes = new HashMap<>();
     private long freshCounter = 0;
@@ -32,6 +33,7 @@ public final class StaticModuleValueChecker {
     public static void check(Ast.Program program, Map<String, Ast.ModuleTypeDecl> signatures) {
         StaticModuleValueChecker checker = new StaticModuleValueChecker(signatures);
         for (Ast.ModuleDecl module : program.modules) {
+            checker.lexicalOwners.put(module.name, module);
             checker.moduleValues.put(module.name,
                     new ModuleRef(module.signature, module.name, module.typeAliases, Map.of()));
         }
@@ -133,6 +135,7 @@ public final class StaticModuleValueChecker {
         if (expr instanceof Ast.Var variable) return moduleValues.get(variable.name);
         if (expr instanceof Ast.FieldAccess field) {
             String path = modulePath(field);
+            if (path != null) requireVisiblePath(path);
             return path == null ? null : moduleValues.get(path);
         }
         if (!(expr instanceof Ast.CallExpr call)) return null;
@@ -186,6 +189,25 @@ public final class StaticModuleValueChecker {
                     " as " + requested);
         }
         return new PackedRef(original, requested);
+    }
+
+    private void requireVisiblePath(String path) {
+        int dot = path.indexOf('.');
+        while (dot >= 0) {
+            String parentName = path.substring(0, dot);
+            int next = path.indexOf('.', dot + 1);
+            String member = next < 0
+                    ? path.substring(dot + 1) : path.substring(dot + 1, next);
+            Ast.ModuleDecl owner = lexicalOwners.get(parentName);
+            if (owner != null && owner.lexicalChildren.containsKey(member)) {
+                Ast.ModuleTypeDecl contract = signatures.get(owner.signature);
+                if (contract == null || !contract.nestedModules.containsKey(member)) {
+                    throw new RuntimeException("Private nested module " + parentName +
+                            "." + member + " is not exported");
+                }
+            }
+            dot = next;
+        }
     }
 
     private static String modulePath(Ast.Expr expr) {
