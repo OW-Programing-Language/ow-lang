@@ -129,6 +129,9 @@ public class Interpreter {
             models.put(m.name, m);
             db.put(m.name, new ArrayList<>());
         }
+        // A class may declare an interface only if it supplies every public
+        // method with the required arity. Validate before running any main code.
+        validateInterfaceImplementations();
         if (!models.isEmpty()) loadDb();
         if (program.mainBody == null) {
             throw new RuntimeException("Program is missing a 'main:' block");
@@ -526,6 +529,68 @@ public class Interpreter {
             return rs.value;
         }
         return 0;
+    }
+
+    /** Reject invalid interface implementations before evaluating the program.
+     * OW's interface signatures currently specify method names and arity only;
+     * parameter/return type matching is not yet part of the OW grammar.
+     */
+    private void validateInterfaceImplementations() {
+        Set<String> verified = new HashSet<>();
+        for (Ast.ClassDecl cls : classes.values()) {
+            checkInheritance(cls, new HashSet<>(), verified);
+        }
+        for (Ast.ClassDecl cls : classes.values()) {
+            for (Ast.ClassDecl ancestor : classChain(cls)) {
+                for (String superName : ancestor.supers) {
+                    Ast.InterfaceDecl iface = interfaces.get(superName);
+                    if (iface == null) continue;
+                    Set<String> names = new HashSet<>();
+                    for (Ast.MethodSig required : iface.methods) {
+                        if (!names.add(required.name)) {
+                            throw new RuntimeException("Interface " + iface.name +
+                                    " declares duplicate method " + required.name);
+                        }
+                        Ast.MethodDecl provided = findMethod(cls, required.name);
+                        if (provided == null) {
+                            throw new RuntimeException("Class " + cls.name +
+                                    " does not implement " + iface.name + "." + required.name +
+                                    "/" + required.params.size());
+                        }
+                        if (provided.isPrivate) {
+                            throw new RuntimeException("Class " + cls.name + "." +
+                                    provided.name + " is private but required publicly by " + iface.name);
+                        }
+                        if (provided.params.size() != required.params.size()) {
+                            throw new RuntimeException("Class " + cls.name + "." +
+                                    required.name + " takes " + provided.params.size() +
+                                    " argument(s), but " + iface.name + " requires " +
+                                    required.params.size());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /** Detect invalid or cyclic class inheritance before walking class chains. */
+    private void checkInheritance(Ast.ClassDecl cls, Set<String> visiting,
+                                   Set<String> visited) {
+        if (visited.contains(cls.name)) return;
+        if (!visiting.add(cls.name)) {
+            throw new RuntimeException("Cyclic class inheritance at " + cls.name);
+        }
+        for (String parentName : cls.supers) {
+            Ast.ClassDecl parentClass = classes.get(parentName);
+            if (parentClass != null) {
+                checkInheritance(parentClass, visiting, visited);
+            } else if (!interfaces.containsKey(parentName)) {
+                throw new RuntimeException("Class " + cls.name +
+                        " extends unknown class or interface " + parentName);
+            }
+        }
+        visiting.remove(cls.name);
+        visited.add(cls.name);
     }
 
     /** The class and its superclass chain (interfaces are skipped — they carry no state/behaviour). */

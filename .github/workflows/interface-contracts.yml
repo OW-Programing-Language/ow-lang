@@ -1,0 +1,22 @@
+name: OW interface contract checks
+
+on:
+  push:
+    paths:
+      - 'src/**'
+      - 'pom.xml'
+      - '.github/workflows/interface-contracts.yml'
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: Compile and test interface checking
+        run: mvn -B test
