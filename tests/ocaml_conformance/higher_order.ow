@@ -1,0 +1,18 @@
+module_type SOURCE:
+  fn get() -> int
+module Seed: SOURCE
+  fn get() -> int:
+    return: 5
+module_type RESULT:
+  fn result() -> int
+functor_type MAKER(SOURCE) -> RESULT
+functor Make(S: SOURCE) -> RESULT:
+  fn result() -> int:
+    return: S.get()
+functor Decorate(F: MAKER) -> RESULT:
+  fn result() -> int:
+    set inner: F(Seed)
+    return: inner.result() + 1
+main:
+  set d RESULT: Decorate(Make)
+  print: d.result()

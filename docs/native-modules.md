@@ -377,3 +377,23 @@ This is **not** generalized representation-polymorphic lowering or compilation
 of packed first-class modules. Dynamic dispatch, non-integer representations,
 and higher-order functor values continue to fail explicitly rather than being
 silently miscompiled.
+
+## Differential OCaml conformance suite
+
+`tools/ocaml_conformance.py` builds and runs paired OCaml and OW source files
+from `tests/ocaml_conformance/`. Positive tests compare exact numeric output
+for lexical module nesting, implementation `include`, first-class module
+packages, dependent functor result sharing and higher-order functors. The
+static LLVM module fixture is compared both through the OW interpreter and
+through an executable compiled with `clang`. Negative tests require *both*
+OCaml's compiler and `ow check` to reject incompatible signatures, unrelated
+opaque module identities, and hidden nested modules.
+
+```sh
+sudo apt-get install ocaml-nox clang
+mvn -B package
+python3 tools/ocaml_conformance.py
+```
+
+This is a **representative behavior-comparison suite**, not exhaustive
+conformance to every OCaml module calculus rule or its entire standard library.

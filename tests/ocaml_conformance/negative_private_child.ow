@@ -1,0 +1,13 @@
+module_type ITEM:
+  fn value() -> int
+module_type SHOP:
+  module Public: ITEM
+module Store: SHOP
+  module Public: ITEM
+    fn value() -> int:
+      return: 5
+  module Private: ITEM
+    fn value() -> int:
+      return: 8
+main:
+  print: Store.Private.value()
