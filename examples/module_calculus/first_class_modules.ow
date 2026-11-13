@@ -1,0 +1,24 @@
+# Existential-style first-class module packages with explicit signatures.
+module_type READ:
+  fn get() -> int
+module_type EXTENDED:
+  include READ
+  fn secret() -> int
+
+module Store: EXTENDED
+  fn get() -> int:
+    return: 42
+  fn secret() -> int:
+    return: 999
+
+main:
+  # Pack as a narrow public signature; the module's identity is retained.
+  set packed: pack(Store, "READ")
+  # Packed modules can be stored in records and arrays.
+  set boxes: [packed]
+  set record: {implementation: boxes[0]}
+  set restored READ: unpack(record.implementation, "READ")
+  call: assert(restored.get() == 42, "first-class module value")
+  # The following is forbidden, even though Store implements EXTENDED:
+  # set illegal: unpack(packed, "EXTENDED")
+  print: "PASS first-class module pack/unpack"
