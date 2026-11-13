@@ -10,7 +10,7 @@ public class Lexer {
         INDENT, DEDENT,
         PLUS, MINUS, STAR, SLASH,
         LPAREN, RPAREN, LBRACKET, RBRACKET, LBRACE, RBRACE,
-        EQ_EQ, NEQ, LT, GT, LE, GE,
+        ASSIGN, EQ_EQ, NEQ, LT, GT, LE, GE,
         EOF
     }
 
@@ -118,7 +118,7 @@ public class Lexer {
                 if (p + 1 < line.length() && line.charAt(p + 1) == '=') {
                     out.add(new Token(Type.EQ_EQ, "==", lineNo)); p += 2; continue;
                 }
-                throw err("Use '==' for equality", lineNo);
+                out.add(new Token(Type.ASSIGN, "=", lineNo)); p++; continue;
             }
             if (c == '!') {
                 if (p + 1 < line.length() && line.charAt(p + 1) == '=') {

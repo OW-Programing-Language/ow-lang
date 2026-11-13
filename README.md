@@ -325,3 +325,10 @@ See [manifest_sharing.ow](examples/module_calculus/manifest_sharing.ow).
 OW now rejects imports from another business module's `infra/` directory and
 rejects `api/` imports of `infra/`. Import cycles and missing imports produce
 source-path/line diagnostics. See [module boundaries](docs/module-boundaries.md).
+
+### Path-dependent functor results
+
+`functor Forward(S: BOX) -> BOX with_type token = S.token` now ties the
+result module's abstract `token` to the input module's token identity.
+This is validated at load time and enforced at module call boundaries. See
+[dependent_result.ow](examples/module_calculus/dependent_result.ow).

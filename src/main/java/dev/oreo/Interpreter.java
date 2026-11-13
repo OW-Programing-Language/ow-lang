@@ -199,7 +199,8 @@ public class Interpreter {
             moduleFunctors.put(functor.name, functor);
             Ast.ModuleTypeDecl signature = moduleTypes.get(functor.outputSignature);
             for (String underlying : functor.typeAliases.values()) {
-                requireKnownType(underlying, functor.name + " type member");
+                // The module type checker validates dependent paths such as Arg.token.
+                if (!underlying.contains(".")) requireKnownType(underlying, functor.name + " type member");
             }
             for (Ast.MethodDecl method : functor.methods) {
                 for (String type : method.paramTypes) {
@@ -609,6 +610,39 @@ public class Interpreter {
         return obj;
     }
 
+    /** Resolve the nominal identity for an abstract type through a path alias. */
+    private String abstractIdentity(OwModule module, String member) {
+        String implementation = module.typeAliases.get(member);
+        if (implementation == null) {
+            throw new RuntimeException("Unknown module type member " + module.name + "." + member);
+        }
+        if (implementation.contains(".")) {
+            String[] parts = implementation.split("\\.", 2);
+            Object supplied = module.captured.get(parts[0]);
+            if (!(supplied instanceof OwModule dependent)) {
+                throw new RuntimeException("Unbound module path " + implementation + " in " + module.name);
+            }
+            return abstractIdentity(dependent, parts[1]);
+        }
+        return module.identity + "." + member;
+    }
+
+    /** Manifest type representation, potentially exposed through a dependent path. */
+    private String publicRepresentation(OwModule module, String member) {
+        Ast.ModuleTypeDecl signature = moduleTypes.get(module.signature);
+        if (signature.manifestTypes.containsKey(member)) return signature.manifestTypes.get(member);
+        String implementation = module.typeAliases.get(member);
+        if (implementation != null && implementation.contains(".")) {
+            String[] parts = implementation.split("\\.", 2);
+            Object supplied = module.captured.get(parts[0]);
+            if (!(supplied instanceof OwModule dependent)) {
+                throw new RuntimeException("Unbound module path " + implementation + " in " + module.name);
+            }
+            return publicRepresentation(dependent, parts[1]);
+        }
+        return null;
+    }
+
     private Object invokeModuleExport(OwModule module, String name, List<Object> args) {
         Ast.ModuleTypeDecl signature = moduleTypes.get(module.signature);
         boolean exposed = false;
@@ -631,20 +665,25 @@ public class Interpreter {
         for (int i = 0; i < method.params.size(); i++) {
             String paramType = method.paramTypes.get(i);
             Object value = args.get(i);
-            if (paramType != null && module.typeAliases.containsKey(paramType) &&
-                    signature.manifestTypes.containsKey(paramType)) {
-                checkType(signature.manifestTypes.get(paramType), value,
-                        "manifest type " + signature.name + "." + paramType);
-            } else if (paramType != null && module.typeAliases.containsKey(paramType)) {
-                String expectedIdentity = module.identity + "." + paramType;
-                if (!(value instanceof OwOpaque opaque) ||
-                        !opaque.typeIdentity.equals(expectedIdentity)) {
-                    throw new RuntimeException("Abstract type mismatch in " +
-                            module.name + "." + name + ": expected " + expectedIdentity);
+            if (paramType != null && module.typeAliases.containsKey(paramType)) {
+                String representationType = publicRepresentation(module, paramType);
+                if (representationType != null) {
+                    checkType(representationType, value, "manifest type " + signature.name + "." + paramType);
+                } else {
+                    String expectedIdentity = abstractIdentity(module, paramType);
+                    if (!(value instanceof OwOpaque opaque) ||
+                            !opaque.typeIdentity.equals(expectedIdentity)) {
+                        throw new RuntimeException("Abstract type mismatch in " +
+                                module.name + "." + name + ": expected " + expectedIdentity);
+                    }
+                    // A functor's dependent type is opaque to the functor itself.
+                    // Keep the token sealed when passing it to the captured module.
+                    if (!module.typeAliases.get(paramType).contains(".")) {
+                        value = opaque.representation;
+                        checkType(module.typeAliases.get(paramType), value,
+                                "representation of " + expectedIdentity);
+                    }
                 }
-                value = ((OwOpaque) value).representation;
-                checkType(module.typeAliases.get(paramType), value,
-                        "representation of " + expectedIdentity);
             } else if (paramType != null) {
                 checkType(paramType, value, "argument " + (i + 1) +
                         " of " + module.name + "." + name);
@@ -657,19 +696,24 @@ public class Interpreter {
         } catch (ReturnSignal signal) {
             result = signal.value;
         }
-        if (method.returnType != null && module.typeAliases.containsKey(method.returnType) &&
-                signature.manifestTypes.containsKey(method.returnType)) {
-            checkType(signature.manifestTypes.get(method.returnType), result,
-                    "manifest return type " + signature.name + "." + method.returnType);
-            return result;
-        }
         if (method.returnType != null && module.typeAliases.containsKey(method.returnType)) {
-            String identity = module.identity + "." + method.returnType;
+            String representationType = publicRepresentation(module, method.returnType);
+            if (representationType != null) {
+                checkType(representationType, result, "manifest return type " +
+                        signature.name + "." + method.returnType);
+                return result;
+            }
+            String identity = abstractIdentity(module, method.returnType);
             if (result instanceof OwOpaque opaque) {
                 if (!opaque.typeIdentity.equals(identity)) {
                     throw new RuntimeException("Abstract return type mismatch: expected " + identity);
                 }
                 return result;
+            }
+            // An opaque path alias cannot be fabricated by a functor.
+            if (module.typeAliases.get(method.returnType).contains(".")) {
+                throw new RuntimeException("Abstract return type mismatch: expected " + identity +
+                        ", got a raw representation");
             }
             checkType(module.typeAliases.get(method.returnType), result,
                       "representation of " + identity);

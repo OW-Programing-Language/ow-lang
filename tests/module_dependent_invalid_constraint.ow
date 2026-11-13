@@ -1,0 +1,13 @@
+module_type BOX:
+  type token
+  fn wrap(value int) -> token
+module A: BOX
+  type token: int
+  fn wrap(value int) -> token:
+    return: value
+functor Invalid(S: BOX) -> BOX with_type token = S.token:
+  type token: int
+  fn wrap(value int) -> token:
+    return: S.wrap(value)
+main:
+  print: "not reached"

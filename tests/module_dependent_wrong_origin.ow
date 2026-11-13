@@ -1,0 +1,25 @@
+module_type BOX:
+  type token
+  fn wrap(value int) -> token
+  fn unwrap(value token) -> int
+module A: BOX
+  type token: int
+  fn wrap(value int) -> token:
+    return: value
+  fn unwrap(value token) -> int:
+    return: value
+module B: BOX
+  type token: int
+  fn wrap(value int) -> token:
+    return: value
+  fn unwrap(value token) -> int:
+    return: value
+functor Forward(S: BOX) -> BOX with_type token = S.token:
+  type token: S.token
+  fn wrap(value int) -> token:
+    return: S.wrap(value)
+  fn unwrap(value token) -> int:
+    return: S.unwrap(value)
+main:
+  set forwarded: Forward(A)
+  print: forwarded.unwrap(B.wrap(3))

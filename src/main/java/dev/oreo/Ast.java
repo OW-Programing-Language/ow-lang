@@ -102,6 +102,7 @@ public class Ast {
         public final List<MethodDecl> methods;
         public final Map<String, String> typeAliases;
         public final boolean generative;
+        public final Map<String, String> typeSharing;
         public FunctorDecl(String name, String argument, String inputSignature,
                            String outputSignature, List<MethodDecl> methods) {
             this(name, argument, inputSignature, outputSignature, methods, Map.of(), false);
@@ -114,6 +115,13 @@ public class Ast {
         public FunctorDecl(String name, String argument, String inputSignature,
                            String outputSignature, List<MethodDecl> methods,
                            Map<String, String> typeAliases, boolean generative) {
+            this(name, argument, inputSignature, outputSignature, methods,
+                 typeAliases, generative, Map.of());
+        }
+        public FunctorDecl(String name, String argument, String inputSignature,
+                           String outputSignature, List<MethodDecl> methods,
+                           Map<String, String> typeAliases, boolean generative,
+                           Map<String, String> typeSharing) {
             this.name = name;
             this.argument = argument;
             this.inputSignature = inputSignature;
@@ -121,6 +129,7 @@ public class Ast {
             this.methods = methods;
             this.typeAliases = typeAliases;
             this.generative = generative;
+            this.typeSharing = typeSharing;
         }
     }
 

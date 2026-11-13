@@ -176,10 +176,24 @@ public class Parser {
         expect(Type.MINUS);
         expect(Type.GT);
         String output = expect(Type.IDENT).text;
+        Map<String, String> sharing = new LinkedHashMap<>();
+        while (matchIdent("with_type")) {
+            String typeMember = expect(Type.IDENT).text;
+            expect(Type.ASSIGN);
+            String path = parseTypePath();
+            if (sharing.putIfAbsent(typeMember, path) != null)
+                throw err("duplicate with_type constraint " + typeMember);
+        }
         expect(Type.COLON);
         ModuleMembers members = parseModuleMethods();
         return new Ast.FunctorDecl(name, argument, input, output,
-                                   members.methods, members.typeAliases, generative);
+                                   members.methods, members.typeAliases, generative, sharing);
+    }
+
+    private String parseTypePath() {
+        String name = expect(Type.IDENT).text;
+        if (match(Type.DOT)) name += "." + expect(Type.IDENT).text;
+        return name;
     }
 
     private record ModuleMembers(List<Ast.MethodDecl> methods, Map<String, String> typeAliases) {}
@@ -194,7 +208,7 @@ public class Parser {
             if (matchIdent("type")) {
                 String name = expect(Type.IDENT).text;
                 expect(Type.COLON);
-                String representation = expect(Type.IDENT).text;
+                String representation = parseTypePath();
                 expect(Type.NEWLINE);
                 if (typeAliases.putIfAbsent(name, representation) != null) {
                     throw err("duplicate module type member " + name);

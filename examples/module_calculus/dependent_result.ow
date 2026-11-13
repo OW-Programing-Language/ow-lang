@@ -1,0 +1,34 @@
+# A dependent output: Forward's token is exactly S.token, not a fresh type.
+module_type BOX:
+  type token
+  fn wrap(value int) -> token
+  fn unwrap(value token) -> int
+
+module First: BOX
+  type token: int
+  fn wrap(value int) -> token:
+    return: value
+  fn unwrap(value token) -> int:
+    return: value
+
+module Second: BOX
+  type token: int
+  fn wrap(value int) -> token:
+    return: value
+  fn unwrap(value token) -> int:
+    return: value
+
+functor Forward(S: BOX) -> BOX with_type token = S.token:
+  type token: S.token
+  fn wrap(value int) -> token:
+    return: S.wrap(value)
+  fn unwrap(value token) -> int:
+    return: S.unwrap(value)
+
+main:
+  set forwarded: Forward(First)
+  call: assert(forwarded.unwrap(First.wrap(5)) == 5, "dependent input")
+  call: assert(First.unwrap(forwarded.wrap(7)) == 7, "dependent output")
+  set secondForwarded: Forward(Second)
+  call: assert(secondForwarded.unwrap(Second.wrap(9)) == 9, "second dependent module")
+  print: "PASS path-dependent functor result type"
