@@ -1,0 +1,24 @@
+module_type LIFECYCLE:
+  fn name() -> string
+  fn start() -> int
+
+module_type INVENTORY:
+  include LIFECYCLE
+  type sku
+  fn issue(x int) -> sku
+  fn inspect(x sku) -> int
+
+module Warehouse: INVENTORY
+  type sku: int
+  fn name() -> string:
+    return: "warehouse"
+  fn start() -> int:
+    return: 0
+  fn issue(x int) -> sku:
+    return: x
+  fn inspect(x sku) -> int:
+    return: x
+
+main:
+  call: assert(Warehouse.inspect(Warehouse.issue(8)) == 8)
+  print: "PASS module_type include"

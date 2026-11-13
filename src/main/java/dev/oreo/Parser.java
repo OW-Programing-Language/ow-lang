@@ -133,9 +133,13 @@ public class Parser {
         List<String> abstractTypes = new ArrayList<>();
         Map<String, String> manifestTypes = new LinkedHashMap<>();
         List<Ast.MethodSig> methods = new ArrayList<>();
+        List<String> includes = new ArrayList<>();
         while (!check(Type.DEDENT) && !check(Type.EOF)) {
             if (check(Type.NEWLINE)) { p++; continue; }
-            if (matchIdent("type")) {
+            if (matchIdent("include")) {
+                includes.add(expect(Type.IDENT).text);
+                expect(Type.NEWLINE);
+            } else if (matchIdent("type")) {
                 String member = expect(Type.IDENT).text;
                 abstractTypes.add(member);
                 if (match(Type.COLON)) {
@@ -150,12 +154,12 @@ public class Parser {
                 methods.add(new Ast.MethodSig(method.text, params.names, params.types,
                                               result, Ast.SourceSpan.from(method)));
             } else {
-                throw err("module_type expects 'type' or 'fn' declaration");
+                throw err("module_type expects 'include', 'type' or 'fn' declaration");
             }
         }
         expect(Type.DEDENT);
         return new Ast.ModuleTypeDecl(name, methods, abstractTypes, manifestTypes,
-                                      Ast.SourceSpan.from(nameToken));
+                                      includes, Ast.SourceSpan.from(nameToken));
     }
 
     // module Name: SIGNATURE

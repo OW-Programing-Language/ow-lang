@@ -103,6 +103,7 @@ public class Ast {
         public final List<MethodSig> methods;
         public final List<String> abstractTypes;
         public final Map<String, String> manifestTypes;
+        public final List<String> includes;
         public final SourceSpan span;
         public ModuleTypeDecl(String name, List<MethodSig> methods) {
             this(name, methods, List.of(), Map.of());
@@ -116,10 +117,15 @@ public class Ast {
         }
         public ModuleTypeDecl(String name, List<MethodSig> methods, List<String> abstractTypes,
                               Map<String, String> manifestTypes, SourceSpan span) {
+            this(name, methods, abstractTypes, manifestTypes, List.of(), span);
+        }
+        public ModuleTypeDecl(String name, List<MethodSig> methods, List<String> abstractTypes,
+                              Map<String, String> manifestTypes, List<String> includes, SourceSpan span) {
             this.name = name;
             this.methods = methods;
             this.abstractTypes = abstractTypes;
             this.manifestTypes = manifestTypes;
+            this.includes = includes;
             this.span = span;
         }
     }
