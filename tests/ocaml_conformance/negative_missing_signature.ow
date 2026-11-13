@@ -1,0 +1,7 @@
+module_type API:
+  fn get() -> int
+module Bad: API
+  fn different() -> int:
+    return: 7
+main:
+  print: 0

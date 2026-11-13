@@ -1,0 +1,16 @@
+module_type READ:
+  fn get() -> int
+module_type EXTENDED:
+  include READ
+  fn secret() -> int
+module Store: EXTENDED
+  fn get() -> int:
+    return: 42
+  fn secret() -> int:
+    return: 99
+main:
+  set boxed: pack(Store, "READ")
+  set shelf: [boxed]
+  set record: {saved: shelf[0]}
+  set reader READ: unpack(record.saved, "READ")
+  print: reader.get()

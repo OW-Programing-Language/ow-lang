@@ -1,0 +1,18 @@
+module_type ITEM:
+  fn value() -> int
+module_type SHOP:
+  module Inventory: ITEM
+  fn total() -> int
+module Store: SHOP
+  module_type INTERNAL:
+    fn secret() -> int
+  module Inventory: ITEM
+    fn value() -> int:
+      return: 12
+  module Internal: INTERNAL
+    fn secret() -> int:
+      return: 8
+  fn total() -> int:
+    return: Inventory.value() + Internal.secret()
+main:
+  print: Store.Inventory.value() + Store.total()

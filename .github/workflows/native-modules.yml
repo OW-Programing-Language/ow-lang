@@ -77,6 +77,10 @@ jobs:
           java -jar target/OwIDE.jar check examples/module_calculus/advanced_module_calculus.ow
           java -jar target/OwIDE.jar run examples/module_calculus/advanced_module_calculus.ow | tee /tmp/ow-advanced.log
           grep -F 'PASS advanced OW module calculus' /tmp/ow-advanced.log
+      - name: Install OCaml reference compiler
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ocaml-nox
+      - name: Compare OW and OCaml semantics with positive and negative fixtures
+        run: python3 tools/ocaml_conformance.py
       - name: Reject malformed modules, functor arguments, and hidden exports
         run: |
           for file in tests/module_calculus_*.ow tests/module_abstract_*.ow tests/module_functor_generative_mismatch.ow tests/module_manifest_mismatch.ow tests/module_dependent_*.ow tests/module_higher_order_*.ow tests/module_named_type_*.ow tests/module_set_make_*.ow; do

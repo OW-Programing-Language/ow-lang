@@ -1,0 +1,19 @@
+module_type BOX:
+  type token
+  fn wrap(x int) -> token
+  fn unwrap(x token) -> int
+module First: BOX
+  type token: int
+  fn wrap(x int) -> token:
+    return: x
+  fn unwrap(x token) -> int:
+    return: x
+functor Forward(Source: BOX) -> BOX with_type token = Source.token:
+  type token: Source.token
+  fn wrap(x int) -> token:
+    return: Source.wrap(x)
+  fn unwrap(x token) -> int:
+    return: Source.unwrap(x)
+main:
+  set forwarded BOX: Forward(First)
+  print: First.unwrap(forwarded.wrap(7))

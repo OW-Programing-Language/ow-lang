@@ -1,0 +1,21 @@
+module_type TOKEN:
+  type token
+  fn issue(x int) -> token
+  fn inspect(x token) -> int
+module Warehouse: TOKEN
+  type token: int
+  fn issue(x int) -> token:
+    return: x
+  fn inspect(x token) -> int:
+    return: x
+module_type STOCK:
+  include TOKEN
+  fn available(x token) -> int
+module Inventory: STOCK with_type token = Warehouse.token:
+  include Warehouse
+  fn available(x token) -> int:
+    if: Warehouse.inspect(x) > 0
+      return: 1
+    return: 0
+main:
+  print: Warehouse.inspect(Inventory.issue(11))
