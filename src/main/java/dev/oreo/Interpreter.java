@@ -62,19 +62,35 @@ public class Interpreter {
         @Override public String toString() { return "<" + cls.name + ">"; }
     }
 
+    /** Opaque abstract type: representation is unavailable to other modules. */
+    public static final class OwOpaque {
+        private final String typeIdentity;
+        private final Object representation;
+        OwOpaque(String typeIdentity, Object representation) {
+            this.typeIdentity = typeIdentity;
+            this.representation = representation;
+        }
+        @Override public String toString() { return "<abstract " + typeIdentity + ">"; }
+    }
+
     /** A public module view: only exports listed in the signature are callable. */
     public static final class OwModule {
         public final String name;
         public final String signature;
+        public final String identity;
         public final Map<String, Ast.MethodDecl> definitions;
         public final Map<String, Object> captured;
+        public final Map<String, String> typeAliases;
         OwModule(String name, String signature, List<Ast.MethodDecl> methods,
-                 Map<String, Object> captured) {
+                 Map<String, Object> captured, Map<String, String> typeAliases,
+                 String identity) {
             this.name = name;
             this.signature = signature;
+            this.identity = identity;
             this.definitions = new LinkedHashMap<>();
             for (Ast.MethodDecl method : methods) definitions.put(method.name, method);
             this.captured = captured;
+            this.typeAliases = typeAliases;
         }
         @Override public String toString() { return "<module " + name + " : " + signature + ">"; }
     }
@@ -156,30 +172,39 @@ public class Interpreter {
         for (Ast.ModuleTypeDecl sig : program.moduleTypes) {
             for (Ast.MethodSig method : sig.methods) {
                 for (String type : method.paramTypes) {
-                    requireKnownType(type, sig.name + "." + method.name);
+                    requireModuleType(type, sig, sig.name + "." + method.name);
                 }
-                requireKnownType(method.returnType, sig.name + "." + method.name);
+                requireModuleType(method.returnType, sig, sig.name + "." + method.name);
             }
         }
         for (Ast.ModuleDecl mod : program.modules) {
+            Ast.ModuleTypeDecl signature = moduleTypes.get(mod.signature);
+            for (String underlying : mod.typeAliases.values()) {
+                requireKnownType(underlying, mod.name + " type member");
+            }
             for (Ast.MethodDecl method : mod.methods) {
                 for (String type : method.paramTypes) {
-                    requireKnownType(type, mod.name + "." + method.name);
+                    requireModuleType(type, signature, mod.name + "." + method.name);
                 }
-                requireKnownType(method.returnType, mod.name + "." + method.name);
+                requireModuleType(method.returnType, signature, mod.name + "." + method.name);
             }
             if (globals.containsKey(mod.name)) {
                 throw new RuntimeException("Duplicate module global " + mod.name);
             }
-            globals.put(mod.name, new OwModule(mod.name, mod.signature, mod.methods, Map.of()));
+            globals.put(mod.name, new OwModule(mod.name, mod.signature, mod.methods, Map.of(),
+                                              mod.typeAliases, mod.name));
         }
         for (Ast.FunctorDecl functor : program.functors) {
             moduleFunctors.put(functor.name, functor);
+            Ast.ModuleTypeDecl signature = moduleTypes.get(functor.outputSignature);
+            for (String underlying : functor.typeAliases.values()) {
+                requireKnownType(underlying, functor.name + " type member");
+            }
             for (Ast.MethodDecl method : functor.methods) {
                 for (String type : method.paramTypes) {
-                    requireKnownType(type, functor.name + "." + method.name);
+                    requireModuleType(type, signature, functor.name + "." + method.name);
                 }
-                requireKnownType(method.returnType, functor.name + "." + method.name);
+                requireModuleType(method.returnType, signature, functor.name + "." + method.name);
             }
         }
         // A class may declare an interface only if it supplies every public
@@ -517,7 +542,8 @@ public class Interpreter {
                             functor.inputSignature + ", got " + mod.signature);
                 }
                 return new OwModule(functor.name + "(" + mod.name + ")", functor.outputSignature,
-                        functor.methods, Map.of(functor.argument, mod));
+                        functor.methods, Map.of(functor.argument, mod), functor.typeAliases,
+                        functor.name + "(" + mod.identity + ")");
             }
             if (isBuiltin(call.name)) {
                 return evalBuiltin(call, env);
@@ -601,17 +627,40 @@ public class Interpreter {
         Map<String, Object> local = new HashMap<>(module.captured);
         for (int i = 0; i < method.params.size(); i++) {
             String paramType = method.paramTypes.get(i);
-            if (paramType != null) {
-                checkType(paramType, args.get(i), "argument " + (i + 1) +
+            Object value = args.get(i);
+            if (paramType != null && module.typeAliases.containsKey(paramType)) {
+                String expectedIdentity = module.identity + "." + paramType;
+                if (!(value instanceof OwOpaque opaque) ||
+                        !opaque.typeIdentity.equals(expectedIdentity)) {
+                    throw new RuntimeException("Abstract type mismatch in " +
+                            module.name + "." + name + ": expected " + expectedIdentity);
+                }
+                value = ((OwOpaque) value).representation;
+                checkType(module.typeAliases.get(paramType), value,
+                        "representation of " + expectedIdentity);
+            } else if (paramType != null) {
+                checkType(paramType, value, "argument " + (i + 1) +
                         " of " + module.name + "." + name);
             }
-            local.put(method.params.get(i), args.get(i));
+            local.put(method.params.get(i), value);
         }
         Object result = 0;
         try {
             execBlock(method.body, local);
         } catch (ReturnSignal signal) {
             result = signal.value;
+        }
+        if (method.returnType != null && module.typeAliases.containsKey(method.returnType)) {
+            String identity = module.identity + "." + method.returnType;
+            if (result instanceof OwOpaque opaque) {
+                if (!opaque.typeIdentity.equals(identity)) {
+                    throw new RuntimeException("Abstract return type mismatch: expected " + identity);
+                }
+                return result;
+            }
+            checkType(module.typeAliases.get(method.returnType), result,
+                      "representation of " + identity);
+            return new OwOpaque(identity, result);
         }
         if (method.returnType != null) {
             checkType(method.returnType, result, "return value of " + module.name + "." + name);
@@ -652,6 +701,12 @@ public class Interpreter {
             checkType(m.returnType, result, "return value of " + m.name);
         }
         return result;
+    }
+
+    /** Module-local abstract type names are valid in the matching signature. */
+    private void requireModuleType(String type, Ast.ModuleTypeDecl signature, String context) {
+        if (signature != null && signature.abstractTypes.contains(type)) return;
+        requireKnownType(type, context);
     }
 
     /** Ensure typed OW declarations only refer to known primitives or loaded types. */
@@ -974,6 +1029,7 @@ public class Interpreter {
     }
 
     private String typeNameOf(Object v) {
+        if (v instanceof OwOpaque o) return "abstract " + o.typeIdentity;
         if (v instanceof OwModule m) return m.signature;
         if (v instanceof Integer) return "int";
         if (v instanceof String) return "string";

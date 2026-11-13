@@ -48,9 +48,16 @@ Multi-file imports are supported. See
 
 ## Limitations and issue #16
 
-This implementation is a **first stage**, not a full OCaml module calculus.
+OW additionally supports opaque abstract type members, declared in signatures as
+`type token` and implemented as `type token: int`. At public method
+boundaries, OW wraps raw representation values into unforgeable abstract module
+values. A `token` from one named module cannot be passed to another module,
+even when both represent tokens internally as integers. See
+[abstract_types.ow](../examples/module_calculus/abstract_types.ow).
+
+The implementation is an **incremental stage**, not a full OCaml module calculus.
 The following are not implemented and remain acceptance criteria in #16:
-opaque abstract type members, type-sharing constraints, path-dependent type
+full abstract-type polymorphism, type-sharing constraints, path-dependent type
 identities, higher-order functors, applicative/generative abstract types,
 fully static analysis of functor bodies, compilation to native binaries,
 fine-grained source-span diagnostics, and compiler-enforced import boundaries.

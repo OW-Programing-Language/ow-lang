@@ -295,3 +295,12 @@ Try [the module calculus example](examples/module_calculus/README.md), and
 read [the implementation and limitations](docs/native-modules.md). These
 features advance [issue #16](https://github.com/OW-Programing-Language/ow-lang/issues/16),
 but abstract types, sharing constraints and generativity remain outstanding.
+
+### Opaque module type members
+
+`module_type BOX` may declare `type token`; an implementation can define
+`type token: int` and return or consume `token` through public functions.
+The runtime seals the concrete integer into an opaque module-specific value,
+preventing callers from mixing values from different BOX modules. Try
+[abstract_types.ow](examples/module_calculus/abstract_types.ow). Type sharing
+constraints and generative/applicative identities are still being developed.

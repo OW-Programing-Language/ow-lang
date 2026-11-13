@@ -1,0 +1,8 @@
+module_type BOX:
+  type token
+  fn wrap(value int) -> token
+module Broken: BOX
+  fn wrap(value int) -> token:
+    return: value
+main:
+  print: "must fail before main"

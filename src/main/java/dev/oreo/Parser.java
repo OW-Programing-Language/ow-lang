@@ -38,8 +38,7 @@ public class Parser {
             } else if (matchIdent("class")) {
                 classes.add(parseClass());
             } else if (matchIdent("module_type")) {
-                Ast.InterfaceDecl sig = parseInterface();
-                moduleTypes.add(new Ast.ModuleTypeDecl(sig.name, sig.methods));
+                moduleTypes.add(parseModuleType());
             } else if (matchIdent("module")) {
                 modules.add(parseModule());
             } else if (matchIdent("functor")) {
@@ -120,6 +119,32 @@ public class Parser {
         return new Ast.InterfaceDecl(name, methods);
     }
 
+    private Ast.ModuleTypeDecl parseModuleType() {
+        String name = expect(Type.IDENT).text;
+        expect(Type.COLON);
+        expect(Type.NEWLINE);
+        expect(Type.INDENT);
+        List<String> abstractTypes = new ArrayList<>();
+        List<Ast.MethodSig> methods = new ArrayList<>();
+        while (!check(Type.DEDENT) && !check(Type.EOF)) {
+            if (check(Type.NEWLINE)) { p++; continue; }
+            if (matchIdent("type")) {
+                abstractTypes.add(expect(Type.IDENT).text);
+                expect(Type.NEWLINE);
+            } else if (matchIdent("fn")) {
+                String method = expect(Type.IDENT).text;
+                ParamSpec params = parseTypedParamList();
+                String result = parseReturnType();
+                expect(Type.NEWLINE);
+                methods.add(new Ast.MethodSig(method, params.names, params.types, result));
+            } else {
+                throw err("module_type expects 'type' or 'fn' declaration");
+            }
+        }
+        expect(Type.DEDENT);
+        return new Ast.ModuleTypeDecl(name, methods, abstractTypes);
+    }
+
     // module Name: SIGNATURE
     //   fn export(args) -> type:
     //     ...
@@ -127,7 +152,8 @@ public class Parser {
         String name = expect(Type.IDENT).text;
         expect(Type.COLON);
         String signature = expect(Type.IDENT).text;
-        return new Ast.ModuleDecl(name, signature, parseModuleMethods());
+        ModuleMembers members = parseModuleMethods();
+        return new Ast.ModuleDecl(name, signature, members.methods, members.typeAliases);
     }
 
     // functor Make(Dependency: INPUT) -> OUTPUT:
@@ -144,20 +170,36 @@ public class Parser {
         expect(Type.GT);
         String output = expect(Type.IDENT).text;
         expect(Type.COLON);
-        return new Ast.FunctorDecl(name, argument, input, output, parseModuleMethods());
+        ModuleMembers members = parseModuleMethods();
+        return new Ast.FunctorDecl(name, argument, input, output,
+                                   members.methods, members.typeAliases);
     }
 
-    private List<Ast.MethodDecl> parseModuleMethods() {
+    private record ModuleMembers(List<Ast.MethodDecl> methods, Map<String, String> typeAliases) {}
+
+    private ModuleMembers parseModuleMethods() {
         expect(Type.NEWLINE);
         expect(Type.INDENT);
         List<Ast.MethodDecl> methods = new ArrayList<>();
+        Map<String, String> typeAliases = new LinkedHashMap<>();
         while (!check(Type.DEDENT) && !check(Type.EOF)) {
             if (check(Type.NEWLINE)) { p++; continue; }
-            if (!matchIdent("fn")) throw err("module body expects 'fn' declarations");
-            methods.add(parseMethod());
+            if (matchIdent("type")) {
+                String name = expect(Type.IDENT).text;
+                expect(Type.COLON);
+                String representation = expect(Type.IDENT).text;
+                expect(Type.NEWLINE);
+                if (typeAliases.putIfAbsent(name, representation) != null) {
+                    throw err("duplicate module type member " + name);
+                }
+            } else if (matchIdent("fn")) {
+                methods.add(parseMethod());
+            } else {
+                throw err("module body expects 'type' or 'fn' declarations");
+            }
         }
         expect(Type.DEDENT);
-        return methods;
+        return new ModuleMembers(methods, typeAliases);
     }
 
     // class Name[(Super, Iface...)]:
