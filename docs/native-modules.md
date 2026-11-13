@@ -126,3 +126,28 @@ See [higher_order.ow](../examples/module_calculus/higher_order.ow).
 This is first-class higher-order composition. It is not complete OCaml
 polymorphic higher-order module inference, and the runtime still evaluates
 functor applications rather than compiling module types away.
+
+## Static checking of known module values
+
+In addition to declaration checking, OW now performs a conservative semantic
+pass over `main` before any user statements execute. The pass tracks module
+values produced by named functor applications, abstract token origins, manifest
+type members and known primitive argument values.
+
+Examples rejected before execution:
+
+- passing `First.token` to a method requiring `Second.token`
+- mixing two `functor_gen` result tokens from separate applications
+- assigning an abstract token to `int`
+- using an opaque token in arithmetic
+- passing a known `int` literal to a module method that requires `string`
+
+Repeated applicative applications of the same functor to the same stable
+module argument share the same abstract type in this preflight checker.
+Explicit `with_type token = Arg.token` keeps the parameter's abstract type
+identity in the result. Errors include source line numbers where available.
+
+The analysis is deliberately conservative: dynamically computed values and
+interactions outside statically known module paths still require runtime
+checks. It does not claim full OCaml type inference or whole-program flow
+analysis.

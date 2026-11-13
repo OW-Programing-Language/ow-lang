@@ -339,3 +339,10 @@ This is validated at load time and enforced at module call boundaries. See
 `functor Decorate(F: MAKER) -> RESULT` can receive another functor; a
 functor returning `MAKER` uses `return_functor: F` to expose a compatible
 functor value. See [higher_order.ow](examples/module_calculus/higher_order.ow).
+
+### Static abstract-type identity checks
+
+OW now checks statically known module values before `main`: passing a token
+from another module, mixing generative identities or leaking an opaque token
+into arithmetic is rejected before the program runs. Unknown dynamic values
+remain guarded by runtime checks. See [native module checks](docs/native-modules.md).
