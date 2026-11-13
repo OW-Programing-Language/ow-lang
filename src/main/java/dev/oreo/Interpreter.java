@@ -182,7 +182,8 @@ public class Interpreter {
         ModuleTypeChecker.check(program);
         moduleTypes.putAll(ModuleTypeChecker.signatures(program));
         functorTypes.putAll(ModuleTypeChecker.functorSignatures(program));
-        for (Ast.ModuleTypeDecl sig : program.moduleTypes) {
+        // Validate inherited members as well as declarations local to the type.
+        for (Ast.ModuleTypeDecl sig : moduleTypes.values()) {
             for (Ast.MethodSig method : sig.methods) {
                 for (String type : method.paramTypes) {
                     requireModuleType(type, sig, sig.name + "." + method.name);

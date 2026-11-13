@@ -17,25 +17,89 @@ public final class ModuleTypeChecker {
     private ModuleTypeChecker() {}
 
     public static Map<String, Ast.ModuleTypeDecl> signatures(Ast.Program program) {
-        Map<String, Ast.ModuleTypeDecl> signatures = new LinkedHashMap<>();
-        for (Ast.ModuleTypeDecl sig : program.moduleTypes) {
-            if (signatures.putIfAbsent(sig.name, sig) != null) {
-                throw new RuntimeException("Duplicate module_type " + sig.name);
+        Map<String, Ast.ModuleTypeDecl> source = new LinkedHashMap<>();
+        for (Ast.ModuleTypeDecl signature : program.moduleTypes) {
+            if (source.putIfAbsent(signature.name, signature) != null) {
+                throw new RuntimeException("Duplicate module_type " + signature.name);
             }
-            Set<String> memberTypes = new HashSet<>();
-            for (String abstractType : sig.abstractTypes) {
-                if (!memberTypes.add(abstractType)) {
-                    throw new RuntimeException("Duplicate abstract type " + sig.name + "." + abstractType);
+        }
+        Map<String, Ast.ModuleTypeDecl> resolved = new LinkedHashMap<>();
+        for (String name : source.keySet()) {
+            expandSignature(name, source, resolved, new LinkedHashSet<>());
+        }
+        return resolved;
+    }
+
+    /** Expand OCaml-style include declarations while retaining typed contracts. */
+    private static Ast.ModuleTypeDecl expandSignature(
+            String name, Map<String, Ast.ModuleTypeDecl> source,
+            Map<String, Ast.ModuleTypeDecl> cache, Set<String> active) {
+        if (cache.containsKey(name)) return cache.get(name);
+        Ast.ModuleTypeDecl declaration = source.get(name);
+        if (declaration == null) {
+            throw new RuntimeException("Unknown module_type include " + name);
+        }
+        if (!active.add(name)) {
+            throw new RuntimeException("Cyclic module_type include: " + active + " -> " + name);
+        }
+        Map<String, Ast.MethodSig> methods = new LinkedHashMap<>();
+        Set<String> types = new LinkedHashSet<>();
+        Map<String, String> manifests = new LinkedHashMap<>();
+
+        for (String included : declaration.includes) {
+            Ast.ModuleTypeDecl inherited = expandSignature(included, source, cache, active);
+            for (String member : inherited.abstractTypes) types.add(member);
+            for (Map.Entry<String, String> entry : inherited.manifestTypes.entrySet()) {
+                String previous = manifests.putIfAbsent(entry.getKey(), entry.getValue());
+                if (previous != null && !previous.equals(entry.getValue())) {
+                    throw new RuntimeException("Conflicting included type " + entry.getKey() +
+                            " in module_type " + name);
                 }
             }
-            Set<String> methods = new HashSet<>();
-            for (Ast.MethodSig method : sig.methods) {
-                if (!methods.add(method.name)) {
-                    throw new RuntimeException("Duplicate export " + sig.name + "." + method.name);
+            for (Ast.MethodSig method : inherited.methods) {
+                Ast.MethodSig previous = methods.putIfAbsent(method.name, method);
+                if (previous != null && !sameSignature(previous, method)) {
+                    throw new RuntimeException("Conflicting included export " +
+                            name + "." + method.name);
                 }
             }
         }
-        return signatures;
+        Set<String> declaredTypes = new HashSet<>();
+        for (String member : declaration.abstractTypes) {
+            if (!declaredTypes.add(member)) {
+                throw new RuntimeException("Duplicate abstract type " + name + "." + member);
+            }
+            types.add(member);
+        }
+        for (Map.Entry<String, String> entry : declaration.manifestTypes.entrySet()) {
+            String previous = manifests.putIfAbsent(entry.getKey(), entry.getValue());
+            if (previous != null && !previous.equals(entry.getValue())) {
+                throw new RuntimeException("Conflicting manifest type " +
+                        name + "." + entry.getKey());
+            }
+        }
+        Set<String> declaredMethods = new HashSet<>();
+        for (Ast.MethodSig method : declaration.methods) {
+            if (!declaredMethods.add(method.name)) {
+                throw new RuntimeException("Duplicate export " + name + "." + method.name);
+            }
+            Ast.MethodSig previous = methods.putIfAbsent(method.name, method);
+            if (previous != null && !sameSignature(previous, method)) {
+                throw new RuntimeException("Conflicting override of included export " +
+                        name + "." + method.name);
+            }
+        }
+        active.remove(name);
+        Ast.ModuleTypeDecl expanded = new Ast.ModuleTypeDecl(name, new ArrayList<>(methods.values()),
+                new ArrayList<>(types), manifests, declaration.span);
+        cache.put(name, expanded);
+        return expanded;
+    }
+
+    private static boolean sameSignature(Ast.MethodSig first, Ast.MethodSig second) {
+        return first.params.size() == second.params.size() &&
+                Objects.equals(first.paramTypes, second.paramTypes) &&
+                Objects.equals(first.returnType, second.returnType);
     }
 
     public static Map<String, Ast.FunctorTypeDecl> functorSignatures(Ast.Program program) {

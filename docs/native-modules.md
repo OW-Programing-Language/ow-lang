@@ -200,3 +200,25 @@ first-class module/functor code with an explicit unsupported LLVM-backend error.
 The procedural LLVM subset cannot yet lower OW module values; refusing to
 silently emit an incomplete executable is intentional. Use `ow run` for module
 execution. Full native-code module compilation remains a separate task.
+
+## Include module signatures
+
+A `module_type` may now `include` one or more other signatures:
+
+```ow
+module_type LIFECYCLE:
+  fn name() -> string
+  fn start() -> int
+
+module_type INVENTORY:
+  include LIFECYCLE
+  type sku
+  fn issue(value int) -> sku
+```
+
+The compiler expands inherited public methods and type members, validates
+implementations against the complete signature, rejects unknown includes,
+cycles, incompatible method overrides and conflicting manifest types.
+Imports can supply included signatures from other files.
+This is **signature inclusion only**; implementation-level `include`,
+nested module paths and module-alias syntax remain future OW work.
