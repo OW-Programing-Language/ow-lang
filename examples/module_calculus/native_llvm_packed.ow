@@ -1,0 +1,16 @@
+# A statically known first-class package is erased after signature checks.
+# The native result cannot call secret(), which is hidden by READ.
+module_type READ:
+  fn get() -> int
+module_type EXTENDED:
+  include READ
+  fn secret() -> int
+module Store: EXTENDED
+  fn get() -> int:
+    return: 42
+  fn secret() -> int:
+    return: 99
+main:
+  set sealed: pack(Store, "READ")
+  set restored READ: unpack(sealed, "READ")
+  print: restored.get()

@@ -74,6 +74,12 @@ jobs:
           java -jar target/OwIDE.jar llvm examples/module_calculus/native_llvm_opaque.ow /tmp/ow-opaque-modules.ll
           clang /tmp/ow-opaque-modules.ll -o /tmp/ow-opaque-modules
           test "$(/tmp/ow-opaque-modules)" = "26"
+      - name: Static sealed first-class module AOT to executable
+        run: |
+          java -jar target/OwIDE.jar check examples/module_calculus/native_llvm_packed.ow
+          java -jar target/OwIDE.jar llvm examples/module_calculus/native_llvm_packed.ow /tmp/ow-packed-modules.ll
+          clang /tmp/ow-packed-modules.ll -o /tmp/ow-packed-modules
+          test "$(/tmp/ow-packed-modules)" = "42"
       - name: Lexical nested modules and explicit signature sealing
         run: |
           java -jar target/OwIDE.jar check examples/module_calculus/lexical_nested_modules.ow
