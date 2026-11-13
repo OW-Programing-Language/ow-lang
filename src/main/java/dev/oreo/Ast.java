@@ -418,8 +418,10 @@ public class Ast {
     public static class CallExpr implements Expr {
         public final String name;
         public final List<Expr> args;
-        public CallExpr(String name, List<Expr> args) {
-            this.name = name; this.args = args;
+        public final int line;
+        public CallExpr(String name, List<Expr> args) { this(name, args, -1); }
+        public CallExpr(String name, List<Expr> args, int line) {
+            this.name = name; this.args = args; this.line = line;
         }
     }
 
@@ -447,10 +449,15 @@ public class Ast {
         public final Expr target;
         public final String method;
         public final List<Expr> args;
+        public final int line;
         public MethodCall(Expr target, String method, List<Expr> args) {
+            this(target, method, args, -1);
+        }
+        public MethodCall(Expr target, String method, List<Expr> args, int line) {
             this.target = target;
             this.method = method;
             this.args = args;
+            this.line = line;
         }
     }
 

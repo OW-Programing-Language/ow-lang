@@ -63,6 +63,166 @@ public final class ModuleTypeChecker {
             validateMethods("functor " + functor.name, functor.outputSignature,
                     functor.methods, signatures);
         }
+        verifyApplications(program, signatures);
+    }
+
+    /**
+     * Lightweight static elaboration of module expressions.
+     *
+     * Known module paths, functor applications, and public API calls are
+     * checked before executing main. Dynamically computed expressions still
+     * receive runtime checks in Interpreter.
+     */
+    private static void verifyApplications(Ast.Program program,
+                                           Map<String, Ast.ModuleTypeDecl> signatures) {
+        Map<String, String> known = new HashMap<>();
+        Map<String, Ast.FunctorDecl> functors = new HashMap<>();
+        for (Ast.ModuleDecl module : program.modules) known.put(module.name, module.signature);
+        for (Ast.FunctorDecl functor : program.functors) functors.put(functor.name, functor);
+        for (Ast.ModuleDecl module : program.modules) {
+            for (Ast.MethodDecl method : module.methods) {
+                validateStmts(method.body, new HashMap<>(known), signatures, functors);
+            }
+        }
+        for (Ast.FunctorDecl functor : program.functors) {
+            Map<String, String> locals = new HashMap<>(known);
+            locals.put(functor.argument, functor.inputSignature);
+            for (Ast.MethodDecl method : functor.methods) {
+                validateStmts(method.body, new HashMap<>(locals), signatures, functors);
+            }
+        }
+        if (program.mainBody != null) {
+            validateStmts(program.mainBody, known, signatures, functors);
+        }
+    }
+
+    private static void validateStmts(List<Ast.Stmt> statements,
+                                      Map<String, String> known,
+                                      Map<String, Ast.ModuleTypeDecl> signatures,
+                                      Map<String, Ast.FunctorDecl> functors) {
+        if (statements == null) return;
+        for (Ast.Stmt stmt : statements) {
+            if (stmt instanceof Ast.SetStmt set) {
+                String inferred = inferModule(set.value, known, signatures, functors);
+                if (set.typeName != null && signatures.containsKey(set.typeName) && inferred != null &&
+                        !matches(signatures.get(inferred), signatures.get(set.typeName))) {
+                    throw new RuntimeException("Module binding " + set.name +
+                            " expects " + set.typeName + ", got " + inferred);
+                }
+                known.put(set.name, inferred);
+            } else if (stmt instanceof Ast.PrintStmt print) {
+                inferModule(print.value, known, signatures, functors);
+            } else if (stmt instanceof Ast.CallStmt call) {
+                inferModule(call.call, known, signatures, functors);
+            } else if (stmt instanceof Ast.ReturnStmt ret) {
+                inferModule(ret.value, known, signatures, functors);
+            } else if (stmt instanceof Ast.IfStmt iff) {
+                inferModule(iff.condition, known, signatures, functors);
+                validateStmts(iff.thenBody, new HashMap<>(known), signatures, functors);
+                validateStmts(iff.elseBody, new HashMap<>(known), signatures, functors);
+            } else if (stmt instanceof Ast.WhileStmt loop) {
+                inferModule(loop.condition, known, signatures, functors);
+                validateStmts(loop.body, new HashMap<>(known), signatures, functors);
+            } else if (stmt instanceof Ast.TryStmt tr) {
+                validateStmts(tr.tryBody, new HashMap<>(known), signatures, functors);
+                validateStmts(tr.catchBody, new HashMap<>(known), signatures, functors);
+            } else if (stmt instanceof Ast.SwitchStmt sw) {
+                inferModule(sw.subject, known, signatures, functors);
+                for (Ast.CaseClause clause : sw.cases) {
+                    for (Ast.Expr expr : clause.values) inferModule(expr, known, signatures, functors);
+                    validateStmts(clause.body, new HashMap<>(known), signatures, functors);
+                }
+                validateStmts(sw.defaultBody, new HashMap<>(known), signatures, functors);
+            } else if (stmt instanceof Ast.SetIndexStmt index) {
+                inferModule(index.index, known, signatures, functors);
+                inferModule(index.value, known, signatures, functors);
+            } else if (stmt instanceof Ast.SetFieldStmt field) {
+                inferModule(field.target, known, signatures, functors);
+                inferModule(field.value, known, signatures, functors);
+            } else if (stmt instanceof Ast.SaveStmt save) {
+                inferModule(save.record, known, signatures, functors);
+            } else if (stmt instanceof Ast.DeleteStmt del) {
+                inferModule(del.where, known, signatures, functors);
+            } else if (stmt instanceof Ast.RouteStmt route) {
+                validateStmts(route.body, new HashMap<>(known), signatures, functors);
+            } else if (stmt instanceof Ast.RespondStmt response) {
+                inferModule(response.value, known, signatures, functors);
+            } else if (stmt instanceof Ast.ServeStmt serve) {
+                inferModule(serve.port, known, signatures, functors);
+            }
+        }
+    }
+
+    /** Return a statically known module signature or null for dynamic values. */
+    private static String inferModule(Ast.Expr expr, Map<String, String> known,
+                                      Map<String, Ast.ModuleTypeDecl> signatures,
+                                      Map<String, Ast.FunctorDecl> functors) {
+        if (expr == null) return null;
+        if (expr instanceof Ast.Var variable) return known.get(variable.name);
+        if (expr instanceof Ast.CallExpr call) {
+            List<String> inputs = new ArrayList<>();
+            for (Ast.Expr arg : call.args) {
+                inputs.add(inferModule(arg, known, signatures, functors));
+            }
+            Ast.FunctorDecl functor = functors.get(call.name);
+            if (functor == null) return null;
+            if (inputs.size() != 1) {
+                throw moduleError(call.line, "Functor " + call.name +
+                        " requires exactly one module argument");
+            }
+            if (inputs.get(0) != null &&
+                    !matches(signatures.get(inputs.get(0)), signatures.get(functor.inputSignature))) {
+                throw moduleError(call.line, "Functor " + call.name + " requires " +
+                        functor.inputSignature + ", got " + inputs.get(0));
+            }
+            return functor.outputSignature;
+        }
+        if (expr instanceof Ast.MethodCall call) {
+            String targetSignature = inferModule(call.target, known, signatures, functors);
+            for (Ast.Expr arg : call.args) inferModule(arg, known, signatures, functors);
+            if (targetSignature != null) {
+                Ast.ModuleTypeDecl signature = signatures.get(targetSignature);
+                Ast.MethodSig method = null;
+                for (Ast.MethodSig m : signature.methods) {
+                    if (m.name.equals(call.method)) { method = m; break; }
+                }
+                if (method == null) {
+                    throw moduleError(call.line, "Module signature " + targetSignature +
+                            " does not export " + call.method);
+                }
+                if (method.params.size() != call.args.size()) {
+                    throw moduleError(call.line, targetSignature + "." + call.method +
+                            " expects " + method.params.size() + " args, got " + call.args.size());
+                }
+            }
+            return null;
+        }
+        if (expr instanceof Ast.BinOp op) {
+            inferModule(op.left, known, signatures, functors);
+            inferModule(op.right, known, signatures, functors);
+        } else if (expr instanceof Ast.Compare op) {
+            inferModule(op.left, known, signatures, functors);
+            inferModule(op.right, known, signatures, functors);
+        } else if (expr instanceof Ast.ArrayLit array) {
+            for (Ast.Expr item : array.elements) inferModule(item, known, signatures, functors);
+        } else if (expr instanceof Ast.MapLit map) {
+            for (Ast.Expr item : map.values) inferModule(item, known, signatures, functors);
+        } else if (expr instanceof Ast.IndexExpr idx) {
+            inferModule(idx.target, known, signatures, functors);
+            inferModule(idx.index, known, signatures, functors);
+        } else if (expr instanceof Ast.FieldAccess field) {
+            inferModule(field.target, known, signatures, functors);
+        } else if (expr instanceof Ast.NewExpr call) {
+            for (Ast.Expr arg : call.args) inferModule(arg, known, signatures, functors);
+        } else if (expr instanceof Ast.FindExpr find) {
+            inferModule(find.where, known, signatures, functors);
+        }
+        return null;
+    }
+
+    private static RuntimeException moduleError(int line, String message) {
+        return new RuntimeException("Module type error" +
+                (line > 0 ? " at line " + line : "") + ": " + message);
     }
 
     private static void validateMethods(String owner, String signatureName,

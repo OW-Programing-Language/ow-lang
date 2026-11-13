@@ -539,12 +539,12 @@ public class Parser {
                 expect(Type.RBRACKET);
                 expr = new Ast.IndexExpr(expr, index);
             } else if (match(Type.DOT)) {
-                String member = expect(Type.IDENT).text;
+                Lexer.Token member = expect(Type.IDENT);
                 if (match(Type.LPAREN)) {
                     List<Ast.Expr> args = parseArgs();
-                    expr = new Ast.MethodCall(expr, member, args);
+                    expr = new Ast.MethodCall(expr, member.text, args, member.line);
                 } else {
-                    expr = new Ast.FieldAccess(expr, member);
+                    expr = new Ast.FieldAccess(expr, member.text);
                 }
             } else {
                 break;
@@ -617,12 +617,12 @@ public class Parser {
             return new Ast.FindExpr(model, where);
         }
         if (check(Type.IDENT)) {
-            String name = expect(Type.IDENT).text;
+            Lexer.Token name = expect(Type.IDENT);
             if (match(Type.LPAREN)) {
                 List<Ast.Expr> args = parseArgs();
-                return new Ast.CallExpr(name, args);
+                return new Ast.CallExpr(name.text, args, name.line);
             }
-            return new Ast.Var(name);
+            return new Ast.Var(name.text);
         }
         throw err("Expected expression");
     }
