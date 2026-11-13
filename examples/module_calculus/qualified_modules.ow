@@ -1,0 +1,35 @@
+# Qualified native module definitions (not only aliases).
+module_type Shop.API:
+  fn get() -> int
+
+module_type Shop.EXTRA:
+  include Shop.API
+  fn name() -> string
+
+module Shop.Inventory: Shop.EXTRA
+  fn get() -> int:
+    return: 15
+  fn name() -> string:
+    return: "inventory"
+
+module Shop.Backup: Shop.API
+  fn get() -> int:
+    return: 30
+
+# Re-export an existing qualified module without duplicating its identity.
+module Inventory = Shop.Inventory
+
+module_type RESULT:
+  fn get() -> int
+
+functor Make(Source: Shop.API) -> RESULT:
+  fn get() -> int:
+    return: Source.get()
+
+main:
+  set primary RESULT: Make(Shop.Inventory)
+  set backup RESULT: Make(Shop.Backup)
+  call: assert(primary.get() == 15, "primary")
+  call: assert(backup.get() == 30, "backup")
+  call: assert(Inventory.get() == 15, "alias")
+  print: "PASS qualified OW modules + signature include"

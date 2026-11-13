@@ -135,6 +135,7 @@ public class Parser {
     private Ast.ModuleTypeDecl parseModuleType() {
         Lexer.Token nameToken = expect(Type.IDENT);
         String name = nameToken.text;
+        while (match(Type.DOT)) name += "." + expect(Type.IDENT).text;
         expect(Type.COLON);
         expect(Type.NEWLINE);
         expect(Type.INDENT);
@@ -145,7 +146,7 @@ public class Parser {
         while (!check(Type.DEDENT) && !check(Type.EOF)) {
             if (check(Type.NEWLINE)) { p++; continue; }
             if (matchIdent("include")) {
-                includes.add(expect(Type.IDENT).text);
+                includes.add(parseQualifiedModuleName());
                 expect(Type.NEWLINE);
             } else if (matchIdent("type")) {
                 String member = expect(Type.IDENT).text;
@@ -188,8 +189,9 @@ public class Parser {
     private Ast.ModuleDecl parseModule() {
         Lexer.Token nameToken = expect(Type.IDENT);
         String name = nameToken.text;
+        while (match(Type.DOT)) name += "." + expect(Type.IDENT).text;
         expect(Type.COLON);
-        String signature = expect(Type.IDENT).text;
+        String signature = parseQualifiedModuleName();
         Map<String, String> sharing = new LinkedHashMap<>();
         while (matchIdent("with_type")) {
             String member = expect(Type.IDENT).text;
@@ -212,11 +214,11 @@ public class Parser {
     private Ast.FunctorTypeDecl parseFunctorType() {
         String name = expect(Type.IDENT).text;
         expect(Type.LPAREN);
-        String input = expect(Type.IDENT).text;
+        String input = parseQualifiedModuleName();
         expect(Type.RPAREN);
         expect(Type.MINUS);
         expect(Type.GT);
-        String output = expect(Type.IDENT).text;
+        String output = parseQualifiedModuleName();
         expect(Type.NEWLINE);
         return new Ast.FunctorTypeDecl(name, input, output);
     }
@@ -230,11 +232,11 @@ public class Parser {
         expect(Type.LPAREN);
         String argument = expect(Type.IDENT).text;
         expect(Type.COLON);
-        String input = expect(Type.IDENT).text;
+        String input = parseQualifiedModuleName();
         expect(Type.RPAREN);
         expect(Type.MINUS);
         expect(Type.GT);
-        String output = expect(Type.IDENT).text;
+        String output = parseQualifiedModuleName();
         Map<String, String> sharing = new LinkedHashMap<>();
         while (matchIdent("with_type")) {
             String typeMember = expect(Type.IDENT).text;
@@ -249,6 +251,12 @@ public class Parser {
                                    members.methods, members.typeAliases, generative,
                                    sharing, members.returnedFunctor,
                                    Ast.SourceSpan.from(nameToken));
+    }
+
+    private String parseQualifiedModuleName() {
+        String name = expect(Type.IDENT).text;
+        while (match(Type.DOT)) name += "." + expect(Type.IDENT).text;
+        return name;
     }
 
     private String parseTypePath() {

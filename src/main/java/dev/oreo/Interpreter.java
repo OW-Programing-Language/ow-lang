@@ -214,14 +214,16 @@ public class Interpreter {
             if (globals.containsKey(mod.name)) {
                 throw new RuntimeException("Duplicate module global " + mod.name);
             }
-            globals.put(mod.name, new OwModule(mod.name, mod.signature, mod.methods, Map.of(),
-                                              mod.typeAliases, mod.name));
+            OwModule nativeValue = new OwModule(mod.name, mod.signature, mod.methods, Map.of(),
+                                                mod.typeAliases, mod.name);
+            if (mod.name.contains(".")) installModuleAlias(mod.name, nativeValue);
+            else globals.put(mod.name, nativeValue);
         }
         // Alias references preserve the exact original OwModule object and
         // its abstract-type identity. Namespaces only expose child paths.
         Map<String, String> resolvedModuleAliases = ModuleTypeChecker.resolvedAliases(program);
         for (Map.Entry<String, String> alias : resolvedModuleAliases.entrySet()) {
-            Object original = globals.get(alias.getValue());
+            Object original = resolveModulePath(alias.getValue());
             if (!(original instanceof OwModule)) {
                 throw new RuntimeException("Unknown aliased module " + alias.getValue());
             }
@@ -254,6 +256,16 @@ public class Interpreter {
         } finally {
             if (ui != null) ui.shutdown();
         }
+    }
+
+    private Object resolveModulePath(String path) {
+        String[] parts = path.split("\\.");
+        Object current = globals.get(parts[0]);
+        for (int i = 1; i < parts.length; i++) {
+            if (!(current instanceof OwNamespace namespace)) return null;
+            current = namespace.members.get(parts[i]);
+        }
+        return current;
     }
 
     private void installModuleAlias(String path, Object value) {
