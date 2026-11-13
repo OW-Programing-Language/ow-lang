@@ -85,10 +85,15 @@ public final class ModuleTypeChecker {
                 throw new RuntimeException("Duplicate global declaration " + type.name);
             }
         }
+        Map<String, Ast.ModuleDecl> namedModules = new LinkedHashMap<>();
         for (Ast.ModuleDecl mod : program.modules) {
             if (!reserved.add(mod.name)) {
                 throw new RuntimeException("Duplicate global declaration " + mod.name);
             }
+            namedModules.put(mod.name, mod);
+        }
+        for (Ast.ModuleDecl mod : program.modules) {
+            validateNamedModuleSharing(mod, namedModules, signatures);
             validateMethods(mod.name, mod.signature, mod.methods, mod.typeAliases, signatures);
         }
         for (Ast.FunctorDecl functor : program.functors) {
@@ -165,6 +170,59 @@ public final class ModuleTypeChecker {
         }
         verifyApplications(program, signatures);
         StaticModuleValueChecker.check(program, signatures);
+    }
+
+    /** Validate named module type-sharing equations and resolve alias cycles. */
+    private static void validateNamedModuleSharing(
+            Ast.ModuleDecl module, Map<String, Ast.ModuleDecl> modules,
+            Map<String, Ast.ModuleTypeDecl> signatures) {
+        Ast.ModuleTypeDecl declaration = signatures.get(module.signature);
+        if (declaration == null) return;
+        for (Map.Entry<String, String> equation : module.typeSharing.entrySet()) {
+            String member = equation.getKey();
+            if (!declaration.abstractTypes.contains(member)) {
+                throw new RuntimeException("Module " + module.name +
+                        " constrains unknown type " + member);
+            }
+            if (!Objects.equals(equation.getValue(), module.typeAliases.get(member))) {
+                throw new RuntimeException("Module " + module.name +
+                        " must implement with_type " + member + " = " + equation.getValue());
+            }
+        }
+        for (Map.Entry<String, String> alias : module.typeAliases.entrySet()) {
+            if (alias.getValue().contains(".")) {
+                resolveNamedType(module.name + "." + alias.getKey(), modules, signatures,
+                                 new LinkedHashSet<>());
+            }
+        }
+    }
+
+    /** Resolve alias chains without leaking a sealed module's representation. */
+    static String resolveNamedType(String qualified,
+                                   Map<String, Ast.ModuleDecl> modules,
+                                   Map<String, Ast.ModuleTypeDecl> signatures,
+                                   Set<String> visited) {
+        if (!qualified.contains(".")) return qualified;
+        if (!visited.add(qualified)) {
+            throw new RuntimeException("Cyclic type equality: " + visited + " -> " + qualified);
+        }
+        String[] parts = qualified.split("\\.", 2);
+        Ast.ModuleDecl source = modules.get(parts[0]);
+        if (source == null) {
+            throw new RuntimeException("Unknown module type path " + qualified);
+        }
+        Ast.ModuleTypeDecl signature = signatures.get(source.signature);
+        if (signature == null || !signature.abstractTypes.contains(parts[1])) {
+            throw new RuntimeException("Unknown abstract type member " + qualified);
+        }
+        String alias = source.typeAliases.get(parts[1]);
+        if (alias == null) {
+            throw new RuntimeException("Missing implementation for type " + qualified);
+        }
+        if (!signature.manifestTypes.containsKey(parts[1]) && !alias.contains(".")) {
+            return qualified;
+        }
+        return resolveNamedType(alias, modules, signatures, visited);
     }
 
     private static void validateDependentPath(Ast.FunctorDecl functor,

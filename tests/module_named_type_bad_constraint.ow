@@ -1,0 +1,13 @@
+module_type BOX:
+  type token
+  fn wrap(x int) -> token
+module First: BOX
+  type token: int
+  fn wrap(x int) -> token:
+    return: x
+module Bad: BOX with_type token = First.token:
+  type token: int
+  fn wrap(x int) -> token:
+    return: x
+main:
+  print: "should not execute"

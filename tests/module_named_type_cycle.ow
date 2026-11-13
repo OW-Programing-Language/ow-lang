@@ -1,0 +1,13 @@
+module_type BOX:
+  type token
+  fn wrap(x int) -> token
+module A: BOX with_type token = B.token:
+  type token: B.token
+  fn wrap(x int) -> token:
+    return: x
+module B: BOX with_type token = A.token:
+  type token: A.token
+  fn wrap(x int) -> token:
+    return: x
+main:
+  print: "must fail"

@@ -346,3 +346,8 @@ OW now checks statically known module values before `main`: passing a token
 from another module, mixing generative identities or leaking an opaque token
 into arithmetic is rejected before the program runs. Unknown dynamic values
 remain guarded by runtime checks. See [native module checks](docs/native-modules.md).
+
+## Named module type sharing
+
+`module Alias: BOX with_type token = First.token` shares an opaque type identity
+between named modules. See [named type sharing](examples/module_calculus/named_type_sharing.ow).

@@ -151,3 +151,22 @@ The analysis is deliberately conservative: dynamically computed values and
 interactions outside statically known module paths still require runtime
 checks. It does not claim full OCaml type inference or whole-program flow
 analysis.
+
+## Named-module with_type constraints
+
+A named module may share an abstract type identity with another module:
+
+```ow
+module Alias: BOX with_type token = First.token:
+  type token: First.token
+  fn wrap(x int) -> token:
+    return: First.wrap(x)
+  fn unwrap(x token) -> int:
+    return: First.unwrap(x)
+```
+
+This preserves the identity of First.token without disclosing its representation.
+The compiler rejects invalid module paths, missing type members, incompatible
+constraints and alias cycles. Structural width signature matching still requires
+all public method names, parameter types, and return types to agree.
+See the NamedTypeSharingTest suite and named_type_sharing.ow example.
