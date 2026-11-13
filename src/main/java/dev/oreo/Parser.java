@@ -127,11 +127,16 @@ public class Parser {
         expect(Type.NEWLINE);
         expect(Type.INDENT);
         List<String> abstractTypes = new ArrayList<>();
+        Map<String, String> manifestTypes = new LinkedHashMap<>();
         List<Ast.MethodSig> methods = new ArrayList<>();
         while (!check(Type.DEDENT) && !check(Type.EOF)) {
             if (check(Type.NEWLINE)) { p++; continue; }
             if (matchIdent("type")) {
-                abstractTypes.add(expect(Type.IDENT).text);
+                String member = expect(Type.IDENT).text;
+                abstractTypes.add(member);
+                if (match(Type.COLON)) {
+                    manifestTypes.put(member, expect(Type.IDENT).text);
+                }
                 expect(Type.NEWLINE);
             } else if (matchIdent("fn")) {
                 String method = expect(Type.IDENT).text;
@@ -144,7 +149,7 @@ public class Parser {
             }
         }
         expect(Type.DEDENT);
-        return new Ast.ModuleTypeDecl(name, methods, abstractTypes);
+        return new Ast.ModuleTypeDecl(name, methods, abstractTypes, manifestTypes);
     }
 
     // module Name: SIGNATURE

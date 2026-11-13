@@ -1,0 +1,24 @@
+# Explicit manifest type: token is publicly known to be int.
+module_type INT_BOX:
+  type token: int
+  fn wrap(x int) -> token
+  fn unwrap(x token) -> int
+
+module First: INT_BOX
+  type token: int
+  fn wrap(x int) -> token:
+    return: x
+  fn unwrap(x token) -> int:
+    return: x
+
+module Second: INT_BOX
+  type token: int
+  fn wrap(x int) -> token:
+    return: x
+  fn unwrap(x token) -> int:
+    return: x
+
+main:
+  call: assert(First.wrap(5) == 5, "representation is public")
+  call: assert(Second.unwrap(First.wrap(7)) == 7, "shared manifest type")
+  print: "PASS manifest type sharing"

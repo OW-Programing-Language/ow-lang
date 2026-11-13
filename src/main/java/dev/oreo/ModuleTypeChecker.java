@@ -244,6 +244,11 @@ public final class ModuleTypeChecker {
                 throw new RuntimeException(owner + " must define abstract type " +
                         signatureName + "." + member + " using 'type " + member + ": concrete_type'");
             }
+            String manifest = signature.manifestTypes.get(member);
+            if (manifest != null && !manifest.equals(typeAliases.get(member))) {
+                throw new RuntimeException(owner + " must share manifest type " +
+                        signatureName + "." + member + " = " + manifest);
+            }
         }
         Map<String, Ast.MethodDecl> supplied = new HashMap<>();
         for (Ast.MethodDecl method : methods) {
@@ -292,6 +297,9 @@ public final class ModuleTypeChecker {
         Map<String, Ast.MethodSig> exposed = new HashMap<>();
         for (Ast.MethodSig method : actual.methods) exposed.put(method.name, method);
         if (!actual.abstractTypes.containsAll(required.abstractTypes)) return false;
+        for (Map.Entry<String, String> member : required.manifestTypes.entrySet()) {
+            if (!member.getValue().equals(actual.manifestTypes.get(member.getKey()))) return false;
+        }
         for (Ast.MethodSig expected : required.methods) {
             Ast.MethodSig member = exposed.get(expected.name);
             if (member == null || member.params.size() != expected.params.size()) return false;
