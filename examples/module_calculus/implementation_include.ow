@@ -1,0 +1,30 @@
+# Include an implementation: methods delegate to the original
+# sealed module, preserving its abstract token identity.
+module_type TOKEN:
+  type token
+  fn issue(x int) -> token
+  fn inspect(t token) -> int
+
+module Warehouse: TOKEN
+  type token: int
+  fn issue(x int) -> token:
+    return: x
+  fn inspect(t token) -> int:
+    return: t
+
+module_type STOCK:
+  include TOKEN
+  fn available(x token) -> int
+
+module Inventory: STOCK
+  include Warehouse
+  fn available(x token) -> int:
+    if: Warehouse.inspect(x) > 0
+      return: 1
+    return: 0
+
+main:
+  set sku: Inventory.issue(11)
+  call: assert(Warehouse.inspect(sku) == 11, "same abstract identity")
+  call: assert(Inventory.available(Warehouse.issue(4)) == 1)
+  print: "PASS implementation include with sealed identity"

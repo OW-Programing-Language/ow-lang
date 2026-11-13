@@ -182,6 +182,7 @@ public final class ModuleTypeChecker {
     }
 
     public static void check(Ast.Program program) {
+        program = ModuleImplementationExpander.expand(program);
         Map<String, Ast.ModuleTypeDecl> signatures = signatures(program);
         Map<String, String> aliases = resolvedAliases(program);
         Map<String, Ast.FunctorTypeDecl> functorTypes = functorSignatures(program);
