@@ -1,0 +1,14 @@
+import "contracts.ow"
+import "ordering.ow"
+import "functors.ow"
+
+# Run: ow run examples/module_calculus/main.ow
+main:
+  set smaller CHOOSER: MakeChooser(Ascending)
+  set larger CHOOSER: MakeChooser(Descending)
+  set byName CHOOSER: MakeChooser(NamedAscending)
+
+  call: assert(smaller.choose(3, 8) == 3, "ascending")
+  call: assert(larger.choose(3, 8) == 8, "descending")
+  call: assert(byName.choose(3, 8) == 3, "structural signature width")
+  print: "PASS native module types + functor substitution"

@@ -1,0 +1,27 @@
+# Two modules fulfilling the same signature.
+module Ascending: ORDERED
+  fn compare(a int, b int) -> int:
+    if: a < b
+      return: 0 - 1
+    if: a > b
+      return: 1
+    return: 0
+
+module Descending: ORDERED
+  fn compare(a int, b int) -> int:
+    if: a > b
+      return: 0 - 1
+    if: a < b
+      return: 1
+    return: 0
+
+# Structural width subtyping: this module exposes more than ORDERED requires.
+module NamedAscending: FULL_ORDER
+  fn compare(a int, b int) -> int:
+    if: a < b
+      return: 0 - 1
+    if: a > b
+      return: 1
+    return: 0
+  fn label() -> string:
+    return: "ascending"

@@ -16,6 +16,9 @@ public class Parser {
         List<Ast.InterfaceDecl> interfaces = new ArrayList<>();
         List<Ast.ClassDecl> classes = new ArrayList<>();
         List<Ast.ModelDecl> models = new ArrayList<>();
+        List<Ast.ModuleTypeDecl> moduleTypes = new ArrayList<>();
+        List<Ast.ModuleDecl> modules = new ArrayList<>();
+        List<Ast.FunctorDecl> functors = new ArrayList<>();
         List<String> imports = new ArrayList<>();
         List<Ast.Stmt> mainBody = null;
 
@@ -34,13 +37,20 @@ public class Parser {
                 interfaces.add(parseInterface());
             } else if (matchIdent("class")) {
                 classes.add(parseClass());
+            } else if (matchIdent("module_type")) {
+                Ast.InterfaceDecl sig = parseInterface();
+                moduleTypes.add(new Ast.ModuleTypeDecl(sig.name, sig.methods));
+            } else if (matchIdent("module")) {
+                modules.add(parseModule());
+            } else if (matchIdent("functor")) {
+                functors.add(parseFunctor());
             } else if (matchIdent("model")) {
                 models.add(parseModel());
             } else if (matchIdent("main")) {
                 if (mainBody != null) throw err("Duplicate 'main' block");
                 mainBody = parseBlockHeaderless();
             } else {
-                throw err("Expected 'import', 'fn', 'enum', 'interface', 'class', 'model' or 'main' at top level, got "
+                throw err("Expected 'import', 'fn', 'enum', 'interface', 'class', 'model', 'module_type', 'module', 'functor' or 'main' at top level, got "
                         + peek().type + (peek().type == Type.IDENT ? "(" + peek().text + ")" : ""));
             }
             consumeNewlines();
@@ -48,7 +58,8 @@ public class Parser {
 
         // 'main' is required for the entry file; imported files may omit it.
         // That check is enforced at run time (Interpreter.run).
-        return new Ast.Program(imports, fns, enums, interfaces, classes, models, mainBody);
+        return new Ast.Program(imports, fns, enums, interfaces, classes, models,
+                               moduleTypes, modules, functors, mainBody);
     }
 
     private Ast.FnDecl parseFnDecl() {
@@ -107,6 +118,46 @@ public class Parser {
         }
         expect(Type.DEDENT);
         return new Ast.InterfaceDecl(name, methods);
+    }
+
+    // module Name: SIGNATURE
+    //   fn export(args) -> type:
+    //     ...
+    private Ast.ModuleDecl parseModule() {
+        String name = expect(Type.IDENT).text;
+        expect(Type.COLON);
+        String signature = expect(Type.IDENT).text;
+        return new Ast.ModuleDecl(name, signature, parseModuleMethods());
+    }
+
+    // functor Make(Dependency: INPUT) -> OUTPUT:
+    //   fn export(args) -> type:
+    //     ...
+    private Ast.FunctorDecl parseFunctor() {
+        String name = expect(Type.IDENT).text;
+        expect(Type.LPAREN);
+        String argument = expect(Type.IDENT).text;
+        expect(Type.COLON);
+        String input = expect(Type.IDENT).text;
+        expect(Type.RPAREN);
+        expect(Type.MINUS);
+        expect(Type.GT);
+        String output = expect(Type.IDENT).text;
+        expect(Type.COLON);
+        return new Ast.FunctorDecl(name, argument, input, output, parseModuleMethods());
+    }
+
+    private List<Ast.MethodDecl> parseModuleMethods() {
+        expect(Type.NEWLINE);
+        expect(Type.INDENT);
+        List<Ast.MethodDecl> methods = new ArrayList<>();
+        while (!check(Type.DEDENT) && !check(Type.EOF)) {
+            if (check(Type.NEWLINE)) { p++; continue; }
+            if (!matchIdent("fn")) throw err("module body expects 'fn' declarations");
+            methods.add(parseMethod());
+        }
+        expect(Type.DEDENT);
+        return methods;
     }
 
     // class Name[(Super, Iface...)]:

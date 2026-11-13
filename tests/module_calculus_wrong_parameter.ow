@@ -1,0 +1,7 @@
+module_type ORDERED:
+  fn compare(a int, b int) -> int
+module Wrong: ORDERED
+  fn compare(a string, b int) -> int:
+    return: 0
+main:
+  print: "must fail before main"

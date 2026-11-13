@@ -283,3 +283,15 @@ optional, so existing OW programs continue working.
 **Current limit:** This validates explicitly declared method signatures at
 interpreter load time. It is not an OCaml module compiler, abstract type system
 or full static inference engine.
+
+## Native module types and functors (experimental)
+
+OW now has native module-language declarations (`module_type`, `module`,
+`functor`) with structural signature validation before `main`. Module
+applications pass module values, not `App` objects, and callable exports are
+restricted by the declared signature.
+
+Try [the module calculus example](examples/module_calculus/README.md), and
+read [the implementation and limitations](docs/native-modules.md). These
+features advance [issue #16](https://github.com/OW-Programing-Language/ow-lang/issues/16),
+but abstract types, sharing constraints and generativity remain outstanding.
