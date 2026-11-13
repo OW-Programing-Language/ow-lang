@@ -24,6 +24,7 @@ public final class NativeModuleLlvmLowerer {
                             Map<String, Ast.MethodDecl> exports,
                             Map<String, String> typeAliases,
                             Map<String, Instance> captured) {}
+    private record Packed(Instance original, String publicSignature) {}
 
     private NativeModuleLlvmLowerer(Ast.Program program) {
         source = ModuleImplementationExpander.expand(program);
@@ -58,13 +59,14 @@ public final class NativeModuleLlvmLowerer {
             throw unsupported("mixing native modules with classes/models is not supported by LLVM");
         }
         Map<String, Instance> mainModules = new LinkedHashMap<>(globalModules);
-        List<Ast.Stmt> main = rewrite(source.mainBody, mainModules);
+        List<Ast.Stmt> main = rewrite(source.mainBody, mainModules, new LinkedHashMap<>());
 
         List<Ast.FnDecl> functions = new ArrayList<>();
         for (Ast.FnDecl fn : source.functions) {
             Map<String, Instance> locals = new LinkedHashMap<>(globalModules);
             for (String param : fn.params) locals.remove(param);
-            functions.add(new Ast.FnDecl(fn.name, fn.params, rewrite(fn.body, locals)));
+            functions.add(new Ast.FnDecl(fn.name, fn.params,
+                    rewrite(fn.body, locals, new LinkedHashMap<>())));
         }
         functions.addAll(generatedFunctions.values());
         return new Ast.Program(List.of(), functions, source.enums,
@@ -72,12 +74,20 @@ public final class NativeModuleLlvmLowerer {
                 List.of(), List.of(), List.of(), List.of(), List.of(), main);
     }
 
-    private List<Ast.Stmt> rewrite(List<Ast.Stmt> body, Map<String, Instance> modules) {
+    private List<Ast.Stmt> rewrite(List<Ast.Stmt> body, Map<String, Instance> modules,
+                                   Map<String, Packed> packages) {
         if (body == null) throw unsupported("missing main or function body");
         List<Ast.Stmt> result = new ArrayList<>();
         for (Ast.Stmt stmt : body) {
             if (stmt instanceof Ast.SetStmt set) {
-                Instance module = inferModule(set.value, modules);
+                Packed packed = inferPacked(set.value, modules, packages);
+                if (packed != null) {
+                    packages.put(set.name, packed);
+                    modules.remove(set.name);
+                    continue;
+                }
+                packages.remove(set.name);
+                Instance module = inferModule(set.value, modules, packages);
                 if (module != null) {
                     // Compile-time module binding produces no runtime i32 storage.
                     modules.put(set.name, module);
@@ -85,21 +95,24 @@ public final class NativeModuleLlvmLowerer {
                 }
                 modules.remove(set.name);
                 result.add(new Ast.SetStmt(set.name, set.typeName,
-                        rewriteExpr(set.value, modules), set.span));
+                        rewriteExpr(set.value, modules, packages), set.span));
             } else if (stmt instanceof Ast.PrintStmt print) {
-                result.add(new Ast.PrintStmt(rewriteExpr(print.value, modules)));
+                result.add(new Ast.PrintStmt(rewriteExpr(print.value, modules, packages)));
             } else if (stmt instanceof Ast.ReturnStmt ret) {
-                result.add(new Ast.ReturnStmt(rewriteExpr(ret.value, modules)));
+                result.add(new Ast.ReturnStmt(rewriteExpr(ret.value, modules, packages)));
             } else if (stmt instanceof Ast.CallStmt call) {
-                result.add(new Ast.CallStmt(rewriteExpr(call.call, modules)));
+                result.add(new Ast.CallStmt(rewriteExpr(call.call, modules, packages)));
             } else if (stmt instanceof Ast.IfStmt branch) {
-                result.add(new Ast.IfStmt(rewriteExpr(branch.condition, modules),
-                        rewrite(branch.thenBody, new LinkedHashMap<>(modules)),
+                result.add(new Ast.IfStmt(rewriteExpr(branch.condition, modules, packages),
+                        rewrite(branch.thenBody, new LinkedHashMap<>(modules),
+                                new LinkedHashMap<>(packages)),
                         branch.elseBody == null ? null :
-                            rewrite(branch.elseBody, new LinkedHashMap<>(modules))));
+                            rewrite(branch.elseBody, new LinkedHashMap<>(modules),
+                                    new LinkedHashMap<>(packages))));
             } else if (stmt instanceof Ast.WhileStmt loop) {
-                result.add(new Ast.WhileStmt(rewriteExpr(loop.condition, modules),
-                        rewrite(loop.body, new LinkedHashMap<>(modules))));
+                result.add(new Ast.WhileStmt(rewriteExpr(loop.condition, modules, packages),
+                        rewrite(loop.body, new LinkedHashMap<>(modules),
+                                new LinkedHashMap<>(packages))));
             } else {
                 throw unsupported("unsupported statement " + stmt.getClass().getSimpleName());
             }
@@ -107,12 +120,13 @@ public final class NativeModuleLlvmLowerer {
         return result;
     }
 
-    private Ast.Expr rewriteExpr(Ast.Expr expr, Map<String, Instance> modules) {
+    private Ast.Expr rewriteExpr(Ast.Expr expr, Map<String, Instance> modules,
+                                 Map<String, Packed> packages) {
         if (expr instanceof Ast.MethodCall call) {
-            Instance module = inferModule(call.target, modules);
+            Instance module = inferModule(call.target, modules, packages);
             if (module == null) throw unsupported("dynamic method dispatch " + call.method);
             List<Ast.Expr> args = new ArrayList<>();
-            for (Ast.Expr arg : call.args) args.add(rewriteExpr(arg, modules));
+            for (Ast.Expr arg : call.args) args.add(rewriteExpr(arg, modules, packages));
             return new Ast.CallExpr(materialize(module, call.method), args, call.span);
         }
         if (expr instanceof Ast.CallExpr call) {
@@ -121,19 +135,21 @@ public final class NativeModuleLlvmLowerer {
             if (functors.containsKey(call.name))
                 throw unsupported("a module functor result cannot be used as an i32 value");
             List<Ast.Expr> args = new ArrayList<>();
-            for (Ast.Expr arg : call.args) args.add(rewriteExpr(arg, modules));
+            for (Ast.Expr arg : call.args) args.add(rewriteExpr(arg, modules, packages));
             return new Ast.CallExpr(call.name, args, call.span);
         }
         if (expr instanceof Ast.Var var && modules.containsKey(var.name))
             throw unsupported("a native module cannot be stored as an i32 value: " + var.name);
+        if (expr instanceof Ast.Var var && packages.containsKey(var.name))
+            throw unsupported("a packed module cannot be stored as an i32 value: " + var.name);
         if (expr instanceof Ast.FieldAccess field)
             throw unsupported("a module namespace/record cannot be an i32 expression");
         if (expr instanceof Ast.BinOp bin)
-            return new Ast.BinOp(bin.op, rewriteExpr(bin.left, modules),
-                    rewriteExpr(bin.right, modules), bin.span);
+            return new Ast.BinOp(bin.op, rewriteExpr(bin.left, modules, packages),
+                    rewriteExpr(bin.right, modules, packages), bin.span);
         if (expr instanceof Ast.Compare cmp)
-            return new Ast.Compare(cmp.op, rewriteExpr(cmp.left, modules),
-                    rewriteExpr(cmp.right, modules));
+            return new Ast.Compare(cmp.op, rewriteExpr(cmp.left, modules, packages),
+                    rewriteExpr(cmp.right, modules, packages));
         if (expr instanceof Ast.IntLit || expr instanceof Ast.StringLit ||
                 expr instanceof Ast.BoolLit || expr instanceof Ast.Var) return expr;
         throw unsupported("only i32/static module expressions are currently lowered, got " +
@@ -166,19 +182,37 @@ public final class NativeModuleLlvmLowerer {
         Map<String, Instance> captured = new LinkedHashMap<>(globalModules);
         captured.putAll(module.captured);
         for (String param : impl.params) captured.remove(param);
-        Ast.FnDecl compiled = new Ast.FnDecl(symbol, impl.params, rewrite(impl.body, captured));
+        Ast.FnDecl compiled = new Ast.FnDecl(symbol, impl.params,
+                rewrite(impl.body, captured, new LinkedHashMap<>()));
         generatedFunctions.put(key, compiled);
         return symbol;
     }
 
-    private Instance inferModule(Ast.Expr expr, Map<String, Instance> modules) {
+    private Instance inferModule(Ast.Expr expr, Map<String, Instance> modules,
+                                 Map<String, Packed> packages) {
         String path = staticPath(expr);
         if (path != null) return modules.get(path);
-        if (!(expr instanceof Ast.CallExpr call) || !functors.containsKey(call.name)) return null;
+        if (!(expr instanceof Ast.CallExpr call)) return null;
+        if ("unpack".equals(call.name)) {
+            if (call.args.size() != 2)
+                throw unsupported("unpack requires a package and its public signature");
+            Packed packageValue = inferPacked(call.args.get(0), modules, packages);
+            if (packageValue == null)
+                throw unsupported("dynamic first-class module package cannot be lowered");
+            String requested = literalModuleSignature(call.args.get(1));
+            if (!ModuleTypeChecker.matches(signatures.get(packageValue.publicSignature),
+                                           signatures.get(requested)))
+                throw unsupported("cannot widen sealed module package " +
+                        packageValue.publicSignature + " to " + requested);
+            Instance original = packageValue.original;
+            return new Instance(original.id, requested, original.exports,
+                                original.typeAliases, original.captured);
+        }
+        if (!functors.containsKey(call.name)) return null;
         Ast.FunctorDecl functor = functors.get(call.name);
         if (call.args.size() != 1 || functor.returnedFunctor != null)
             throw unsupported("higher-order and multi-argument functors are not lowered");
-        Instance argument = inferModule(call.args.get(0), modules);
+        Instance argument = inferModule(call.args.get(0), modules, packages);
         if (argument == null)
             throw unsupported("functor " + functor.name + " requires a static module argument");
         if (!ModuleTypeChecker.matches(signatures.get(argument.signature),
@@ -194,6 +228,31 @@ public final class NativeModuleLlvmLowerer {
                 functor.typeAliases, Map.of(functor.argument, argument));
         if (!functor.generative) applicativeInstances.put(key, instance);
         return instance;
+    }
+
+    private String literalModuleSignature(Ast.Expr expression) {
+        if (!(expression instanceof Ast.StringLit literal) ||
+                !signatures.containsKey(literal.value))
+            throw unsupported("module package signature must be a known string literal");
+        return literal.value;
+    }
+
+    /** A package with a fully known source and ascription can be erased at AOT. */
+    private Packed inferPacked(Ast.Expr expr, Map<String, Instance> modules,
+                               Map<String, Packed> packages) {
+        if (expr instanceof Ast.Var var) return packages.get(var.name);
+        if (!(expr instanceof Ast.CallExpr call) || !"pack".equals(call.name))
+            return null;
+        if (call.args.size() != 2)
+            throw unsupported("pack requires a module and its public signature");
+        Instance sourceModule = inferModule(call.args.get(0), modules, packages);
+        if (sourceModule == null)
+            throw unsupported("dynamic first-class module cannot be lowered");
+        String exposed = literalModuleSignature(call.args.get(1));
+        if (!ModuleTypeChecker.matches(signatures.get(sourceModule.signature),
+                                       signatures.get(exposed)))
+            throw unsupported("cannot pack " + sourceModule.signature + " as " + exposed);
+        return new Packed(sourceModule, exposed);
     }
 
     /**

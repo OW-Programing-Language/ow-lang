@@ -67,6 +67,79 @@ public class NativeModuleLlvmLowererTest {
         assertTrue(generated.split("define i32 @__ow_module_").length >= 3);
     }
 
+    @Test public void staticallyPackedModuleCanBeUnpackedAsNarrowInterface() {
+        String generated = ir("""
+                module_type READ:
+                  fn get() -> int
+                module_type EXTENDED:
+                  include READ
+                  fn secret() -> int
+                module Store: EXTENDED
+                  fn get() -> int:
+                    return: 42
+                  fn secret() -> int:
+                    return: 99
+                main:
+                  set sealed: pack(Store, "READ")
+                  set reader READ: unpack(sealed, "READ")
+                  print: reader.get()
+                """);
+        assertTrue(generated.contains("call i32 @__ow_module_"));
+    }
+
+    @Test public void directStaticPackUnpackCanSpecializeOpaqueIntegerToken() {
+        String generated = ir("""
+                module_type API:
+                  type token
+                  fn wrap(x int) -> token
+                  fn unwrap(x token) -> int
+                module M: API
+                  type token: int
+                  fn wrap(x int) -> token:
+                    return: x
+                  fn unwrap(x token) -> int:
+                    return: x
+                main:
+                  set checked API: unpack(pack(M, "API"), "API")
+                  print: checked.unwrap(checked.wrap(8))
+                """);
+        assertTrue(generated.contains("define i32 @__ow_module_"));
+    }
+
+    @Test public void sealedPackageCannotWidenAtNativeCompilation() {
+        RuntimeException error = assertThrows(RuntimeException.class, () -> ir("""
+                module_type READ:
+                  fn get() -> int
+                module_type EXTENDED:
+                  include READ
+                  fn secret() -> int
+                module Store: EXTENDED
+                  fn get() -> int:
+                    return: 1
+                  fn secret() -> int:
+                    return: 99
+                main:
+                  set sealed: pack(Store, "READ")
+                  set wrong: unpack(sealed, "EXTENDED")
+                """));
+        assertTrue(error.getMessage().contains("cannot widen"));
+    }
+
+    @Test public void runtimeArrayOfPackagesIsStillExplicitlyUnsupported() {
+        UnsupportedOperationException error = assertThrows(
+                UnsupportedOperationException.class, () -> ir("""
+                module_type READ:
+                  fn get() -> int
+                module Store: READ
+                  fn get() -> int:
+                    return: 1
+                main:
+                  set shelf: [pack(Store, "READ")]
+                  print: 0
+                """));
+        assertTrue(error.getMessage().contains("only i32/static module expressions"));
+    }
+
     @Test public void firstClassModuleCannotBeSilentlyErased() {
         UnsupportedOperationException ex = assertThrows(UnsupportedOperationException.class, () -> ir("""
                 module_type API:
@@ -76,9 +149,9 @@ public class NativeModuleLlvmLowererTest {
                     return: 5
                 main:
                   set packed: pack(M, "API")
-                  print: 0
+                  print: packed
                 """));
-        assertTrue(ex.getMessage().contains("first-class module package values"));
+        assertTrue(ex.getMessage().contains("packed module cannot be stored as an i32 value"));
     }
 
     @Test public void opaqueIntegerModuleCanBeLowered() {

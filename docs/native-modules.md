@@ -419,3 +419,21 @@ Changed functor bindings are removed from the known static environment;
 branch merges preserve a returned functor only when all possible paths agree.
 Full generalized higher-kinded inference and dynamic functor packages are
 still outstanding.
+
+## Native static pack/unpack specialization
+
+The LLVM backend can now eliminate a `pack` / `unpack` pair **only when the
+compiler knows the source module, package signature and unpack signature**.
+This keeps the narrowed public signature while lowering module method calls
+into the existing statically specialized integer functions. The checked opaque
+identity of integer-backed abstract types is preserved by the static checker.
+
+```ow
+set sealed: pack(Store, "READ")
+set restored READ: unpack(sealed, "READ")
+print: restored.get()
+```
+
+This is static package specialization, **not** a runtime representation of
+first-class packages in LLVM. Arrays/records containing packed modules,
+arbitrary dynamic dispatch and broader representations remain interpreter-only.
