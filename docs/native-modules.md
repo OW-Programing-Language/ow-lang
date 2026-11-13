@@ -170,3 +170,20 @@ The compiler rejects invalid module paths, missing type members, incompatible
 constraints and alias cycles. Structural width signature matching still requires
 all public method names, parameter types, and return types to agree.
 See the NamedTypeSharingTest suite and named_type_sharing.ow example.
+
+## OCaml Set.Make comparison and source diagnostics
+
+The [Set.Make comparison](../examples/module_calculus/set_make.ow) provides a
+small immutable collection with `empty`, `add`, `member`, and `size`.
+The `MakeSet(Order: ORDERED)` functor requires an abstract comparison
+interface and produces a `SET` whose element type is tied to `Order.t`
+with `with_type`. The implementation uses OW arrays and performs duplicate
+elimination; unlike OCaml's standard balanced-tree Set, it is a small
+linear-time educational analogue.
+
+The module checker emits location-aware diagnostics for incompatible module
+applications, missing exports, parameter/return mismatches, and certain
+abstract type escapes. Import errors, forbidden infra references and import
+cycles include the original file and import line/column. Lexer tokens carry
+1-based source spans with exclusive end columns. Ordinary dynamic expressions
+still require interpreter checks and are not all statically typed.

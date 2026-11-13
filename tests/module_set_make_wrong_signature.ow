@@ -1,0 +1,14 @@
+module_type ORDERED:
+  fn compare(a int, b int) -> int
+module_type NOT_ORDERED:
+  fn compare(a int, b int) -> string
+module Incorrect: NOT_ORDERED
+  fn compare(a int, b int) -> string:
+    return: "wrong"
+module_type RESULT:
+  fn get() -> int
+functor Make(O: ORDERED) -> RESULT:
+  fn get() -> int:
+    return: 1
+main:
+  set bad: Make(Incorrect)

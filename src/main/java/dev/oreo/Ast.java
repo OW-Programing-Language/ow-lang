@@ -4,6 +4,28 @@ import java.util.*;
 
 public class Ast {
 
+    /** Source range is 1-based, end-column exclusive; unknown spans stay optional. */
+    public static final class SourceSpan {
+        public static final SourceSpan UNKNOWN = new SourceSpan("<source>", -1, -1, -1, -1);
+        public final String source;
+        public final int line, column, endLine, endColumn;
+        public SourceSpan(String source, int line, int column, int endLine, int endColumn) {
+            this.source = source;
+            this.line = line;
+            this.column = column;
+            this.endLine = endLine;
+            this.endColumn = endColumn;
+        }
+        public static SourceSpan from(Lexer.Token token) {
+            return new SourceSpan(token.source, token.line, token.column,
+                                  token.line, token.endColumn);
+        }
+        public String location() {
+            return line > 0 ? source + ":" + line + ":" + column +
+                    "-" + endLine + ":" + endColumn : "<unknown>";
+        }
+    }
+
     public static class Program {
         public final List<String> imports;
         public final List<FnDecl> functions;
@@ -81,6 +103,7 @@ public class Ast {
         public final List<MethodSig> methods;
         public final List<String> abstractTypes;
         public final Map<String, String> manifestTypes;
+        public final SourceSpan span;
         public ModuleTypeDecl(String name, List<MethodSig> methods) {
             this(name, methods, List.of(), Map.of());
         }
@@ -89,10 +112,15 @@ public class Ast {
         }
         public ModuleTypeDecl(String name, List<MethodSig> methods, List<String> abstractTypes,
                               Map<String, String> manifestTypes) {
+            this(name, methods, abstractTypes, manifestTypes, SourceSpan.UNKNOWN);
+        }
+        public ModuleTypeDecl(String name, List<MethodSig> methods, List<String> abstractTypes,
+                              Map<String, String> manifestTypes, SourceSpan span) {
             this.name = name;
             this.methods = methods;
             this.abstractTypes = abstractTypes;
             this.manifestTypes = manifestTypes;
+            this.span = span;
         }
     }
 
@@ -102,6 +130,7 @@ public class Ast {
         public final List<MethodDecl> methods;
         public final Map<String, String> typeAliases;
         public final Map<String, String> typeSharing;
+        public final SourceSpan span;
         public ModuleDecl(String name, String signature, List<MethodDecl> methods) {
             this(name, signature, methods, Map.of(), Map.of());
         }
@@ -111,11 +140,17 @@ public class Ast {
         }
         public ModuleDecl(String name, String signature, List<MethodDecl> methods,
                           Map<String, String> typeAliases, Map<String, String> typeSharing) {
+            this(name, signature, methods, typeAliases, typeSharing, SourceSpan.UNKNOWN);
+        }
+        public ModuleDecl(String name, String signature, List<MethodDecl> methods,
+                          Map<String, String> typeAliases, Map<String, String> typeSharing,
+                          SourceSpan span) {
             this.name = name;
             this.signature = signature;
             this.methods = methods;
             this.typeAliases = typeAliases;
             this.typeSharing = typeSharing;
+            this.span = span;
         }
     }
 
@@ -137,6 +172,7 @@ public class Ast {
         public final boolean generative;
         public final Map<String, String> typeSharing;
         public final String returnedFunctor;
+        public final SourceSpan span;
         public FunctorDecl(String name, String argument, String inputSignature,
                            String outputSignature, List<MethodDecl> methods) {
             this(name, argument, inputSignature, outputSignature, methods, Map.of(), false);
@@ -163,6 +199,13 @@ public class Ast {
                            String outputSignature, List<MethodDecl> methods,
                            Map<String, String> typeAliases, boolean generative,
                            Map<String, String> typeSharing, String returnedFunctor) {
+            this(name, argument, inputSignature, outputSignature, methods, typeAliases,
+                 generative, typeSharing, returnedFunctor, SourceSpan.UNKNOWN);
+        }
+        public FunctorDecl(String name, String argument, String inputSignature,
+                           String outputSignature, List<MethodDecl> methods,
+                           Map<String, String> typeAliases, boolean generative,
+                           Map<String, String> typeSharing, String returnedFunctor, SourceSpan span) {
             this.name = name;
             this.argument = argument;
             this.inputSignature = inputSignature;
@@ -172,6 +215,7 @@ public class Ast {
             this.generative = generative;
             this.typeSharing = typeSharing;
             this.returnedFunctor = returnedFunctor;
+            this.span = span;
         }
     }
 
@@ -213,14 +257,20 @@ public class Ast {
         public final List<String> params;
         public final List<String> paramTypes;
         public final String returnType;
+        public final SourceSpan span;
         public MethodSig(String name, List<String> params) {
             this(name, params, Collections.nCopies(params.size(), null), null);
         }
         public MethodSig(String name, List<String> params, List<String> paramTypes, String returnType) {
+            this(name, params, paramTypes, returnType, SourceSpan.UNKNOWN);
+        }
+        public MethodSig(String name, List<String> params, List<String> paramTypes,
+                         String returnType, SourceSpan span) {
             this.name = name;
             this.params = params;
             this.paramTypes = paramTypes;
             this.returnType = returnType;
+            this.span = span;
         }
     }
 
@@ -253,17 +303,24 @@ public class Ast {
         public final List<String> paramTypes;
         public final String returnType;
         public final List<Stmt> body;
+        public final SourceSpan span;
         public MethodDecl(String name, boolean isPrivate, List<String> params, List<Stmt> body) {
             this(name, isPrivate, params, Collections.nCopies(params.size(), null), null, body);
         }
         public MethodDecl(String name, boolean isPrivate, List<String> params,
                           List<String> paramTypes, String returnType, List<Stmt> body) {
+            this(name, isPrivate, params, paramTypes, returnType, body, SourceSpan.UNKNOWN);
+        }
+        public MethodDecl(String name, boolean isPrivate, List<String> params,
+                          List<String> paramTypes, String returnType, List<Stmt> body,
+                          SourceSpan span) {
             this.name = name;
             this.isPrivate = isPrivate;
             this.params = params;
             this.paramTypes = paramTypes;
             this.returnType = returnType;
             this.body = body;
+            this.span = span;
         }
     }
 
@@ -289,10 +346,15 @@ public class Ast {
         public final String name;
         public final String typeName; // optional, may be null
         public final Expr value;
+        public final SourceSpan span;
         public SetStmt(String name, String typeName, Expr value) {
+            this(name, typeName, value, SourceSpan.UNKNOWN);
+        }
+        public SetStmt(String name, String typeName, Expr value, SourceSpan span) {
             this.name = name;
             this.typeName = typeName;
             this.value = value;
+            this.span = span;
         }
     }
 
@@ -484,8 +546,12 @@ public class Ast {
     public static class BinOp implements Expr {
         public final String op;
         public final Expr left, right;
+        public final SourceSpan span;
         public BinOp(String op, Expr left, Expr right) {
-            this.op = op; this.left = left; this.right = right;
+            this(op, left, right, SourceSpan.UNKNOWN);
+        }
+        public BinOp(String op, Expr left, Expr right, SourceSpan span) {
+            this.op = op; this.left = left; this.right = right; this.span = span;
         }
     }
 
@@ -501,9 +567,13 @@ public class Ast {
         public final String name;
         public final List<Expr> args;
         public final int line;
+        public final SourceSpan span;
         public CallExpr(String name, List<Expr> args) { this(name, args, -1); }
         public CallExpr(String name, List<Expr> args, int line) {
-            this.name = name; this.args = args; this.line = line;
+            this(name, args, new SourceSpan("<source>", line, -1, line, -1));
+        }
+        public CallExpr(String name, List<Expr> args, SourceSpan span) {
+            this.name = name; this.args = args; this.line = span.line; this.span = span;
         }
     }
 
@@ -532,14 +602,19 @@ public class Ast {
         public final String method;
         public final List<Expr> args;
         public final int line;
+        public final SourceSpan span;
         public MethodCall(Expr target, String method, List<Expr> args) {
             this(target, method, args, -1);
         }
         public MethodCall(Expr target, String method, List<Expr> args, int line) {
+            this(target, method, args, new SourceSpan("<source>", line, -1, line, -1));
+        }
+        public MethodCall(Expr target, String method, List<Expr> args, SourceSpan span) {
             this.target = target;
             this.method = method;
             this.args = args;
-            this.line = line;
+            this.line = span.line;
+            this.span = span;
         }
     }
 

@@ -53,13 +53,23 @@ public final class Loader {
         List<Ast.FunctorDecl> functors = new ArrayList<>();
         List<Ast.FunctorTypeDecl> functorTypes = new ArrayList<>();
 
-        Ast.Program entry = new Parser(new Lexer(src).lexAll()).parseProgram();
+        Ast.Program entry = new Parser(new Lexer(src,
+                baseDir.resolve("<editor-buffer>").toString()).lexAll()).parseProgram();
         Set<Path> visited = new HashSet<>();
         Deque<Path> active = new ArrayDeque<>();
         for (String imp : entry.imports) {
             Path target = baseDir.resolve(imp).normalize();
+            int line = sourceImportLine(src, imp);
+            int column = sourceImportColumn(src, imp);
+            Path source = baseDir.resolve("<editor-buffer>");
             if (!Files.exists(target)) {
-                throw new RuntimeException("import not found: \"" + imp + "\"");
+                throw new RuntimeException(source + ":" + line + ":" + column +
+                        ": import not found: \"" + imp + "\"");
+            }
+            checkImportBoundary(source, target, line, column);
+            if (active.contains(target.toAbsolutePath().normalize())) {
+                throw new RuntimeException(source + ":" + line + ":" + column +
+                        ": Import cycle: " + active + " -> " + target);
             }
             collect(target, visited, fns, enums, interfaces, classes, models, moduleTypes, modules, functors, functorTypes, active, false);
         }
@@ -97,16 +107,22 @@ public final class Loader {
         active.addLast(norm);
 
         String src = Files.readString(norm, StandardCharsets.UTF_8);
-        Ast.Program prog = new Parser(new Lexer(src).lexAll()).parseProgram();
+        Ast.Program prog = new Parser(new Lexer(src, norm.toString()).lexAll()).parseProgram();
 
         // Load imports first (depth-first), resolved relative to this file.
         for (String imp : prog.imports) {
             Path target = norm.getParent().resolve(imp).normalize();
             int line = sourceImportLine(src, imp);
+            int column = sourceImportColumn(src, imp);
             if (!Files.exists(target)) {
-                throw new RuntimeException(norm + ":" + line + ": import not found: \"" + imp + "\"");
+                throw new RuntimeException(norm + ":" + line + ":" + column +
+                        ": import not found: \"" + imp + "\"");
             }
-            checkImportBoundary(norm, target, line);
+            checkImportBoundary(norm, target, line, column);
+            if (active.contains(target.toAbsolutePath().normalize())) {
+                throw new RuntimeException(norm + ":" + line + ":" + column +
+                        ": Import cycle: " + active + " -> " + target);
+            }
             collect(target, visited, fns, enums, interfaces, classes, models, moduleTypes, modules, functors, functorTypes, active, false);
         }
 
@@ -145,12 +161,12 @@ public final class Loader {
         return null;
     }
 
-    private static void checkImportBoundary(Path source, Path target, int line) {
+    private static void checkImportBoundary(Path source, Path target, int line, int column) {
         Domain origin = domainOf(source);
         Domain destination = domainOf(target);
         if (origin == null || destination == null || !destination.zone.equals("infra")) return;
         if (origin.zone.equals("api") || !origin.root.equals(destination.root)) {
-            throw new RuntimeException(source + ":" + line +
+            throw new RuntimeException(source + ":" + line + ":" + column +
                     ": module boundary violation: cannot import implementation " + target +
                     " from " + origin.zone + "; import the target module's api/ instead");
         }
@@ -161,6 +177,16 @@ public final class Loader {
         String needle = "import \"" + imported + "\"";
         for (int i = 0; i < lines.length; i++) {
             if (lines[i].strip().equals(needle)) return i + 1;
+        }
+        return 1;
+    }
+
+    private static int sourceImportColumn(String source, String imported) {
+        String[] lines = source.split("\\n", -1);
+        String needle = "import \"" + imported + "\"";
+        for (String line : lines) {
+            int at = line.indexOf(needle);
+            if (at >= 0) return at + 1;
         }
         return 1;
     }

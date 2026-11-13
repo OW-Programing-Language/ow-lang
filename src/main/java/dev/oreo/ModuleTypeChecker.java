@@ -94,7 +94,8 @@ public final class ModuleTypeChecker {
         }
         for (Ast.ModuleDecl mod : program.modules) {
             validateNamedModuleSharing(mod, namedModules, signatures);
-            validateMethods(mod.name, mod.signature, mod.methods, mod.typeAliases, signatures);
+            validateMethods(mod.name, mod.signature, mod.methods, mod.typeAliases,
+                            signatures, mod.span);
         }
         for (Ast.FunctorDecl functor : program.functors) {
             if (!reserved.add(functor.name)) {
@@ -165,7 +166,7 @@ public final class ModuleTypeChecker {
                             " cannot return_functor for module signature " + functor.outputSignature);
                 }
                 validateMethods("functor " + functor.name, functor.outputSignature,
-                        functor.methods, functor.typeAliases, signatures);
+                        functor.methods, functor.typeAliases, signatures, functor.span);
             }
         }
         verifyApplications(program, signatures);
@@ -337,14 +338,14 @@ public final class ModuleTypeChecker {
             Ast.FunctorDecl functor = functors.get(call.name);
             if (functor == null) return null;
             if (inputs.size() != 1) {
-                throw moduleError(call.line, "Functor " + call.name +
+                throw moduleError(call.span, "Functor " + call.name +
                         " requires exactly one module argument");
             }
             if (inputs.get(0) != null &&
                     !matches(signatures.get(inputs.get(0)), signatures.get(functor.inputSignature))) {
                 String expects = signatures.containsKey(functor.inputSignature)
                         ? functor.inputSignature : "functor " + functor.inputSignature;
-                throw moduleError(call.line, "Functor " + call.name + " requires " +
+                throw moduleError(call.span, "Functor " + call.name + " requires " +
                         expects + ", got " + inputs.get(0));
             }
             return functor.outputSignature;
@@ -360,11 +361,11 @@ public final class ModuleTypeChecker {
                     if (m.name.equals(call.method)) { method = m; break; }
                 }
                 if (method == null) {
-                    throw moduleError(call.line, "Module signature " + targetSignature +
+                    throw moduleError(call.span, "Module signature " + targetSignature +
                             " does not export " + call.method);
                 }
                 if (method.params.size() != call.args.size()) {
-                    throw moduleError(call.line, targetSignature + "." + call.method +
+                    throw moduleError(call.span, targetSignature + "." + call.method +
                             " expects " + method.params.size() + " args, got " + call.args.size());
                 }
             }
@@ -393,6 +394,18 @@ public final class ModuleTypeChecker {
         return null;
     }
 
+    private static String location(Ast.SourceSpan span) {
+        return span != null && span.line > 0 ? " at " + span.location() : "";
+    }
+
+    private static RuntimeException moduleError(Ast.SourceSpan span, String message) {
+        String prefix = span != null && span.line > 0
+                ? " at line " + span.line + ", column " + span.column +
+                  " (" + span.location() + ")"
+                : "";
+        return new RuntimeException("Module type error" + prefix + ": " + message);
+    }
+
     private static RuntimeException moduleError(int line, String message) {
         return new RuntimeException("Module type error" +
                 (line > 0 ? " at line " + line : "") + ": " + message);
@@ -401,36 +414,41 @@ public final class ModuleTypeChecker {
     private static void validateMethods(String owner, String signatureName,
                                         List<Ast.MethodDecl> methods,
                                         Map<String, String> typeAliases,
-                                        Map<String, Ast.ModuleTypeDecl> signatures) {
+                                        Map<String, Ast.ModuleTypeDecl> signatures,
+                                        Ast.SourceSpan span) {
         Ast.ModuleTypeDecl signature = signatures.get(signatureName);
         if (signature == null) {
-            throw new RuntimeException(owner + " references unknown module_type " + signatureName);
+            throw new RuntimeException(owner + " references unknown module_type " +
+                                       signatureName + location(span));
         }
         for (String member : signature.abstractTypes) {
             if (!typeAliases.containsKey(member)) {
                 throw new RuntimeException(owner + " must define abstract type " +
-                        signatureName + "." + member + " using 'type " + member + ": concrete_type'");
+                        signatureName + "." + member + " using 'type " + member +
+                        ": concrete_type'" + location(span));
             }
             String manifest = signature.manifestTypes.get(member);
             if (manifest != null && !manifest.equals(typeAliases.get(member))) {
                 throw new RuntimeException(owner + " must share manifest type " +
-                        signatureName + "." + member + " = " + manifest);
+                        signatureName + "." + member + " = " + manifest + location(span));
             }
         }
         Map<String, Ast.MethodDecl> supplied = new HashMap<>();
         for (Ast.MethodDecl method : methods) {
             if (supplied.putIfAbsent(method.name, method) != null) {
-                throw new RuntimeException(owner + " defines duplicate method " + method.name);
+                throw new RuntimeException(owner + " defines duplicate method " +
+                                           method.name + location(method.span));
             }
         }
         for (Ast.MethodSig expected : signature.methods) {
             Ast.MethodDecl actual = supplied.get(expected.name);
             if (actual == null) {
                 throw new RuntimeException(owner + " missing required export " +
-                        signatureName + "." + expected.name);
+                        signatureName + "." + expected.name + location(span));
             }
             if (actual.isPrivate) {
-                throw new RuntimeException(owner + " export " + expected.name + " is private");
+                throw new RuntimeException(owner + " export " + expected.name +
+                                           " is private" + location(actual.span));
             }
             requireMethodMatch(owner + "." + expected.name, expected, actual);
         }
@@ -440,19 +458,22 @@ public final class ModuleTypeChecker {
                                            Ast.MethodDecl actual) {
         if (signature.params.size() != actual.params.size()) {
             throw new RuntimeException(path + " arity mismatch: expected " +
-                    signature.params.size() + ", got " + actual.params.size());
+                    signature.params.size() + ", got " + actual.params.size() +
+                    location(actual.span));
         }
         for (int i = 0; i < signature.params.size(); i++) {
             String expected = signature.paramTypes.get(i);
             String provided = actual.paramTypes.get(i);
             if (expected != null && !expected.equals(provided)) {
                 throw new RuntimeException(path + " argument " + (i + 1) +
-                        " type mismatch: expected " + expected + ", got " + provided);
+                        " type mismatch: expected " + expected + ", got " +
+                        provided + location(actual.span));
             }
         }
         if (signature.returnType != null && !signature.returnType.equals(actual.returnType)) {
             throw new RuntimeException(path + " return type mismatch: expected " +
-                    signature.returnType + ", got " + actual.returnType);
+                    signature.returnType + ", got " + actual.returnType +
+                    location(actual.span));
         }
     }
 

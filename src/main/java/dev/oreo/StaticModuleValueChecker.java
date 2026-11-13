@@ -51,7 +51,7 @@ public final class StaticModuleValueChecker {
                     ValueType type = inferValue(set.value);
                     if (set.typeName != null && type != null &&
                             !signatures.containsKey(set.typeName)) {
-                        ensureAssignable(set.typeName, type, -1);
+                        ensureAssignable(set.typeName, type, set.span);
                     }
                     if (type != null) valueTypes.put(set.name, type);
                     else valueTypes.remove(set.name);
@@ -173,15 +173,15 @@ public final class StaticModuleValueChecker {
                         ValueType expected = typeMember(target, required);
                         if (expected != null) {
                             if (expected.primitive != null && passed.abstractIdentity != null) {
-                                throw error(call.line, "manifest type " + declaration.name +
+                                throw error(call.span, "manifest type " + declaration.name +
                                         "." + required + " expects " + expected.primitive +
                                         "; opaque type " + passed.abstractIdentity +
                                         " cannot be used as " + expected.primitive);
                             }
-                            ensureSame(expected, passed, call.line);
+                            ensureSame(expected, passed, call.span);
                         }
                     } else {
-                        ensureAssignable(required, passed, call.line);
+                        ensureAssignable(required, passed, call.span);
                     }
                 }
                 if (method.returnType == null) return null;
@@ -203,7 +203,7 @@ public final class StaticModuleValueChecker {
             ValueType right = inferValue(operation.right);
             if ((left != null && left.abstractIdentity != null) ||
                 (right != null && right.abstractIdentity != null)) {
-                throw new RuntimeException("Module type error: opaque abstract type escapes through arithmetic");
+                throw error(operation.span, "opaque abstract type escapes through arithmetic");
             }
             if ("+".equals(operation.op) &&
                 (isString(left) || isString(right))) return ValueType.primitive("string");
@@ -248,10 +248,10 @@ public final class StaticModuleValueChecker {
         return type != null && "string".equals(type.primitive);
     }
 
-    private static void ensureAssignable(String required, ValueType provided, int line) {
+    private static void ensureAssignable(String required, ValueType provided, Ast.SourceSpan span) {
         if (provided == null) return;
         if (provided.abstractIdentity != null) {
-            throw error(line, "opaque type " + provided.abstractIdentity +
+            throw error(span, "opaque type " + provided.abstractIdentity +
                     " cannot be used as " + required);
         }
         String actual = provided.primitive;
@@ -266,24 +266,27 @@ public final class StaticModuleValueChecker {
         // Only reject provably incompatible primitive types; custom OW types
         // are still handled by the interpreter.
         if (Set.of("int", "float", "double", "string", "str", "bool", "boolean", "array").contains(required)) {
-            throw error(line, "expected " + required + " but got " + actual);
+            throw error(span, "expected " + required + " but got " + actual);
         }
     }
 
-    private static void ensureSame(ValueType expected, ValueType actual, int line) {
+    private static void ensureSame(ValueType expected, ValueType actual, Ast.SourceSpan span) {
         if (expected.abstractIdentity != null) {
             if (!expected.abstractIdentity.equals(actual.abstractIdentity)) {
-                throw error(line, "Abstract type mismatch (static abstract type mismatch): expected " +
+                throw error(span, "Abstract type mismatch (static abstract type mismatch): expected " +
                         expected.abstractIdentity + ", got " +
                         (actual.abstractIdentity != null ? actual.abstractIdentity : actual.primitive));
             }
         } else if (expected.primitive != null) {
-            ensureAssignable(expected.primitive, actual, line);
+            ensureAssignable(expected.primitive, actual, span);
         }
     }
 
-    private static RuntimeException error(int line, String message) {
-        return new RuntimeException("Module type error" +
-                (line > 0 ? " at line " + line : "") + ": " + message);
+    private static RuntimeException error(Ast.SourceSpan span, String message) {
+        String place = span != null && span.line > 0
+                ? " at line " + span.line + ", column " + span.column +
+                  " (" + span.location() + ")"
+                : "";
+        return new RuntimeException("Module type error" + place + ": " + message);
     }
 }

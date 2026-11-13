@@ -125,7 +125,8 @@ public class Parser {
     }
 
     private Ast.ModuleTypeDecl parseModuleType() {
-        String name = expect(Type.IDENT).text;
+        Lexer.Token nameToken = expect(Type.IDENT);
+        String name = nameToken.text;
         expect(Type.COLON);
         expect(Type.NEWLINE);
         expect(Type.INDENT);
@@ -142,24 +143,27 @@ public class Parser {
                 }
                 expect(Type.NEWLINE);
             } else if (matchIdent("fn")) {
-                String method = expect(Type.IDENT).text;
+                Lexer.Token method = expect(Type.IDENT);
                 ParamSpec params = parseTypedParamList();
                 String result = parseReturnType();
                 expect(Type.NEWLINE);
-                methods.add(new Ast.MethodSig(method, params.names, params.types, result));
+                methods.add(new Ast.MethodSig(method.text, params.names, params.types,
+                                              result, Ast.SourceSpan.from(method)));
             } else {
                 throw err("module_type expects 'type' or 'fn' declaration");
             }
         }
         expect(Type.DEDENT);
-        return new Ast.ModuleTypeDecl(name, methods, abstractTypes, manifestTypes);
+        return new Ast.ModuleTypeDecl(name, methods, abstractTypes, manifestTypes,
+                                      Ast.SourceSpan.from(nameToken));
     }
 
     // module Name: SIGNATURE
     //   fn export(args) -> type:
     //     ...
     private Ast.ModuleDecl parseModule() {
-        String name = expect(Type.IDENT).text;
+        Lexer.Token nameToken = expect(Type.IDENT);
+        String name = nameToken.text;
         expect(Type.COLON);
         String signature = expect(Type.IDENT).text;
         Map<String, String> sharing = new LinkedHashMap<>();
@@ -176,7 +180,8 @@ public class Parser {
         ModuleMembers members = parseModuleMethods();
         if (members.returnedFunctor != null)
             throw err("module may not return a functor");
-        return new Ast.ModuleDecl(name, signature, members.methods, members.typeAliases, sharing);
+        return new Ast.ModuleDecl(name, signature, members.methods, members.typeAliases,
+                                  sharing, Ast.SourceSpan.from(nameToken));
     }
 
     // functor_type FACTORY(INPUT) -> OUTPUT
@@ -196,7 +201,8 @@ public class Parser {
     //   fn export(args) -> type:
     //     ...
     private Ast.FunctorDecl parseFunctor(boolean generative) {
-        String name = expect(Type.IDENT).text;
+        Lexer.Token nameToken = expect(Type.IDENT);
+        String name = nameToken.text;
         expect(Type.LPAREN);
         String argument = expect(Type.IDENT).text;
         expect(Type.COLON);
@@ -217,7 +223,8 @@ public class Parser {
         ModuleMembers members = parseModuleMethods();
         return new Ast.FunctorDecl(name, argument, input, output,
                                    members.methods, members.typeAliases, generative,
-                                   sharing, members.returnedFunctor);
+                                   sharing, members.returnedFunctor,
+                                   Ast.SourceSpan.from(nameToken));
     }
 
     private String parseTypePath() {
@@ -311,11 +318,12 @@ public class Parser {
 
     private Ast.MethodDecl parseMethod() {
         boolean isPrivate = parseVisibility();
-        String name = expect(Type.IDENT).text;
+        Lexer.Token nameToken = expect(Type.IDENT);
         ParamSpec params = parseTypedParamList();
         String returnType = parseReturnType();
         List<Ast.Stmt> body = parseBlockHeaderless();
-        return new Ast.MethodDecl(name, isPrivate, params.names, params.types, returnType, body);
+        return new Ast.MethodDecl(nameToken.text, isPrivate, params.names, params.types,
+                                  returnType, body, Ast.SourceSpan.from(nameToken));
     }
 
     private record ParamSpec(List<String> names, List<String> types) {}
@@ -462,7 +470,8 @@ public class Parser {
     }
 
     private Ast.Stmt parseSet() {
-        String name = expect(Type.IDENT).text;
+        Lexer.Token nameToken = expect(Type.IDENT);
+        String name = nameToken.text;
 
         // Field assignment: set a.b.c: value
         if (check(Type.DOT)) {
@@ -498,7 +507,7 @@ public class Parser {
         expect(Type.COLON);
         Ast.Expr value = parseExpr();
         expect(Type.NEWLINE);
-        return new Ast.SetStmt(name, typeName, value);
+        return new Ast.SetStmt(name, typeName, value, Ast.SourceSpan.from(nameToken));
     }
 
     // try: <block> catch <name>: <block>
@@ -612,10 +621,10 @@ public class Parser {
     private Ast.Expr parseAdd() {
         Ast.Expr left = parseMul();
         while (check(Type.PLUS) || check(Type.MINUS)) {
-            String op = peek().text;
+            Lexer.Token op = peek();
             p++;
             Ast.Expr right = parseMul();
-            left = new Ast.BinOp(op, left, right);
+            left = new Ast.BinOp(op.text, left, right, Ast.SourceSpan.from(op));
         }
         return left;
     }
@@ -623,10 +632,10 @@ public class Parser {
     private Ast.Expr parseMul() {
         Ast.Expr left = parsePostfix();
         while (check(Type.STAR) || check(Type.SLASH)) {
-            String op = peek().text;
+            Lexer.Token op = peek();
             p++;
             Ast.Expr right = parsePostfix();
-            left = new Ast.BinOp(op, left, right);
+            left = new Ast.BinOp(op.text, left, right, Ast.SourceSpan.from(op));
         }
         return left;
     }
@@ -642,7 +651,7 @@ public class Parser {
                 Lexer.Token member = expect(Type.IDENT);
                 if (match(Type.LPAREN)) {
                     List<Ast.Expr> args = parseArgs();
-                    expr = new Ast.MethodCall(expr, member.text, args, member.line);
+                    expr = new Ast.MethodCall(expr, member.text, args, Ast.SourceSpan.from(member));
                 } else {
                     expr = new Ast.FieldAccess(expr, member.text);
                 }
@@ -720,7 +729,7 @@ public class Parser {
             Lexer.Token name = expect(Type.IDENT);
             if (match(Type.LPAREN)) {
                 List<Ast.Expr> args = parseArgs();
-                return new Ast.CallExpr(name.text, args, name.line);
+                return new Ast.CallExpr(name.text, args, Ast.SourceSpan.from(name));
             }
             return new Ast.Var(name.text);
         }

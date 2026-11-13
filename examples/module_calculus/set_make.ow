@@ -1,0 +1,65 @@
+# OCaml OrderedType / Set.Make-style example using OW's opaque module types.
+module_type ORDERED:
+  type t
+  fn make(value int) -> t
+  fn compare(a t, b t) -> int
+
+module IntOrdered: ORDERED
+  type t: int
+  fn make(value int) -> t:
+    return: value
+  fn compare(a t, b t) -> int:
+    if: a < b
+      return: 0 - 1
+    if: a > b
+      return: 1
+    return: 0
+
+module_type SET:
+  type element
+  fn empty() -> array
+  fn member(values array, value element) -> bool
+  fn add(values array, value element) -> array
+  fn size(values array) -> int
+
+# The element type of the returned set is the parameter's abstract t.
+functor MakeSet(O: ORDERED) -> SET with_type element = O.t:
+  type element: O.t
+  fn empty() -> array:
+    return: array(0, 0)
+
+  fn member(values array, value element) -> bool:
+    set i int: 0
+    while: i < len(values)
+      if: O.compare(values[i], value) == 0
+        return: true
+      set i: i + 1
+    return: false
+
+  fn add(values array, value element) -> array:
+    set i int: 0
+    while: i < len(values)
+      if: O.compare(values[i], value) == 0
+        return: values
+      set i: i + 1
+    set result: array(len(values) + 1, 0)
+    set j int: 0
+    while: j < len(values)
+      set result[j]: values[j]
+      set j: j + 1
+    set result[len(values)]: value
+    return: result
+
+  fn size(values array) -> int:
+    return: len(values)
+
+main:
+  set IntSet SET: MakeSet(IntOrdered)
+  set s: IntSet.empty()
+  set s: IntSet.add(s, IntOrdered.make(7))
+  set s: IntSet.add(s, IntOrdered.make(2))
+  set s: IntSet.add(s, IntOrdered.make(7))
+  call: assert(IntSet.size(s) == 2, "deduplicated")
+  call: assert(IntSet.member(s, IntOrdered.make(2)) == true, "membership")
+  call: assert(IntSet.member(s, IntOrdered.make(9)) == false, "missing")
+  print: "PASS OrderedType / MakeSet"
