@@ -631,7 +631,11 @@ public class Interpreter {
         for (int i = 0; i < method.params.size(); i++) {
             String paramType = method.paramTypes.get(i);
             Object value = args.get(i);
-            if (paramType != null && module.typeAliases.containsKey(paramType)) {
+            if (paramType != null && module.typeAliases.containsKey(paramType) &&
+                    signature.manifestTypes.containsKey(paramType)) {
+                checkType(signature.manifestTypes.get(paramType), value,
+                        "manifest type " + signature.name + "." + paramType);
+            } else if (paramType != null && module.typeAliases.containsKey(paramType)) {
                 String expectedIdentity = module.identity + "." + paramType;
                 if (!(value instanceof OwOpaque opaque) ||
                         !opaque.typeIdentity.equals(expectedIdentity)) {
@@ -652,6 +656,12 @@ public class Interpreter {
             execBlock(method.body, local);
         } catch (ReturnSignal signal) {
             result = signal.value;
+        }
+        if (method.returnType != null && module.typeAliases.containsKey(method.returnType) &&
+                signature.manifestTypes.containsKey(method.returnType)) {
+            checkType(signature.manifestTypes.get(method.returnType), result,
+                    "manifest return type " + signature.name + "." + method.returnType);
+            return result;
         }
         if (method.returnType != null && module.typeAliases.containsKey(method.returnType)) {
             String identity = module.identity + "." + method.returnType;

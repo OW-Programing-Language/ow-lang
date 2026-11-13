@@ -1,0 +1,9 @@
+module_type INT_BOX:
+  type token: int
+  fn wrap(x int) -> token
+module Wrong: INT_BOX
+  type token: string
+  fn wrap(x int) -> token:
+    return: "bad"
+main:
+  print: "must fail"

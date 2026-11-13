@@ -61,6 +61,12 @@ identity. Explicit `functor_gen` creates fresh result type identities for
 each application, even with the same argument. See
 [functor_identity.ow](../examples/module_calculus/functor_identity.ow).
 
+**Manifest type sharing:** `module_type INT_BOX:` can declare
+`type token: int` rather than `type token`. The underlying type becomes
+part of the public contract and is checked against each module's implementation;
+compatible modules share the concrete type instead of wrapping it opaquely.
+See [manifest_sharing.ow](../examples/module_calculus/manifest_sharing.ow).
+
 The implementation is an **incremental stage**, not a full OCaml module calculus.
 The following are not implemented and remain acceptance criteria in #16:
 full abstract-type polymorphism, type-sharing constraints, path-dependent type

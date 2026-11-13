@@ -311,3 +311,11 @@ constraints and generative/applicative identities are still being developed.
 applications with the same stable module argument. For explicit generativity,
 `functor_gen Fresh(S: SOURCE) -> BOX` creates fresh identities on each call.
 See [functor_identity.ow](examples/module_calculus/functor_identity.ow).
+
+### Explicit manifest types
+
+A `module_type` may expose `type token: int` to make its representation
+public, unlike a sealed `type token`. Modules must agree on the concrete type
+and can exchange values safely across this shared interface. This covers
+manifest type sharing, not OCaml's complete `with type` path equations.
+See [manifest_sharing.ow](examples/module_calculus/manifest_sharing.ow).

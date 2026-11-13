@@ -63,13 +63,19 @@ public class Ast {
         public final String name;
         public final List<MethodSig> methods;
         public final List<String> abstractTypes;
+        public final Map<String, String> manifestTypes;
         public ModuleTypeDecl(String name, List<MethodSig> methods) {
-            this(name, methods, List.of());
+            this(name, methods, List.of(), Map.of());
         }
         public ModuleTypeDecl(String name, List<MethodSig> methods, List<String> abstractTypes) {
+            this(name, methods, abstractTypes, Map.of());
+        }
+        public ModuleTypeDecl(String name, List<MethodSig> methods, List<String> abstractTypes,
+                              Map<String, String> manifestTypes) {
             this.name = name;
             this.methods = methods;
             this.abstractTypes = abstractTypes;
+            this.manifestTypes = manifestTypes;
         }
     }
 
