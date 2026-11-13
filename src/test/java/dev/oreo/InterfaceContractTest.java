@@ -133,4 +133,68 @@ public class InterfaceContractTest {
                 """));
         assertTrue(error.getMessage().contains("Cyclic class inheritance"));
     }
+
+    @Test public void typedSignatureAndRuntimeValuesPass() {
+        String result = run("""
+                interface Calculator:
+                  fn sum(a int, b int) -> int
+                class Adder(Calculator):
+                  fn sum(a int, b int) -> int:
+                    return: a + b
+                main:
+                  set calc Calculator: new Adder()
+                  print: calc.sum(2, 3)
+                """);
+        assertTrue(result.contains("5"));
+    }
+
+    @Test public void mismatchedParameterTypeRejectedAtLoad() {
+        RuntimeException error = assertThrows(RuntimeException.class, () -> run("""
+                interface Calculator:
+                  fn sum(a int, b int) -> int
+                class Wrong(Calculator):
+                  fn sum(a string, b int) -> int:
+                    return: 0
+                main:
+                  print: "unreachable"
+                """));
+        assertTrue(error.getMessage(), error.getMessage().contains("parameter 1 must be int"));
+    }
+
+    @Test public void mismatchedReturnTypeRejectedAtLoad() {
+        RuntimeException error = assertThrows(RuntimeException.class, () -> run("""
+                interface Calculator:
+                  fn sum(a int, b int) -> int
+                class Wrong(Calculator):
+                  fn sum(a int, b int) -> string:
+                    return: "no"
+                main:
+                  print: "unreachable"
+                """));
+        assertTrue(error.getMessage(), error.getMessage().contains("must return int"));
+    }
+
+    @Test public void typedParameterCheckedAtRuntime() {
+        RuntimeException error = assertThrows(RuntimeException.class, () -> run("""
+                class Adder:
+                  fn sum(a int, b int) -> int:
+                    return: a + b
+                main:
+                  set a: new Adder()
+                  print: a.sum("bad", 2)
+                """));
+        assertTrue(error.getMessage().contains("argument 1 of sum expects int"));
+    }
+
+    @Test public void typedReturnCheckedAtRuntime() {
+        RuntimeException error = assertThrows(RuntimeException.class, () -> run("""
+                class Broken:
+                  fn read() -> string:
+                    return: 123
+                main:
+                  set a: new Broken()
+                  print: a.read()
+                """));
+        assertTrue(error.getMessage().contains("return value of read expects string"));
+    }
 }

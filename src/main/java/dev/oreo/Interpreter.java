@@ -521,14 +521,22 @@ public class Interpreter {
         Map<String, Object> local = new HashMap<>();
         local.put("this", obj);
         for (int i = 0; i < m.params.size(); i++) {
+            String parameterType = m.paramTypes.get(i);
+            if (parameterType != null) {
+                checkType(parameterType, args.get(i), "argument " + (i + 1) + " of " + m.name);
+            }
             local.put(m.params.get(i), args.get(i));
         }
+        Object result = 0;
         try {
             execBlock(m.body, local);
         } catch (ReturnSignal rs) {
-            return rs.value;
+            result = rs.value;
         }
-        return 0;
+        if (m.returnType != null) {
+            checkType(m.returnType, result, "return value of " + m.name);
+        }
+        return result;
     }
 
     /** Reject invalid interface implementations before evaluating the program.
@@ -566,6 +574,20 @@ public class Interpreter {
                                     required.name + " takes " + provided.params.size() +
                                     " argument(s), but " + iface.name + " requires " +
                                     required.params.size());
+                        }
+                        for (int a = 0; a < required.params.size(); a++) {
+                            String expectedType = required.paramTypes.get(a);
+                            if (expectedType != null && !expectedType.equals(provided.paramTypes.get(a))) {
+                                throw new RuntimeException("Class " + cls.name + "." +
+                                        required.name + " parameter " + (a + 1) +
+                                        " must be " + expectedType + " for " + iface.name);
+                            }
+                        }
+                        if (required.returnType != null &&
+                                !required.returnType.equals(provided.returnType)) {
+                            throw new RuntimeException("Class " + cls.name + "." +
+                                    required.name + " must return " + required.returnType +
+                                    " for " + iface.name);
                         }
                     }
                 }

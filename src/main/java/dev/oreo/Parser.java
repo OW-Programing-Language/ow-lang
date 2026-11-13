@@ -100,9 +100,10 @@ public class Parser {
             if (check(Type.NEWLINE)) { p++; continue; }
             if (!matchIdent("fn")) throw err("interface body expects 'fn' signatures");
             String m = expect(Type.IDENT).text;
-            List<String> params = parseParamList();
+            ParamSpec params = parseTypedParamList();
+            String returnType = parseReturnType();
             expect(Type.NEWLINE);
-            methods.add(new Ast.MethodSig(m, params));
+            methods.add(new Ast.MethodSig(m, params.names, params.types, returnType));
         }
         expect(Type.DEDENT);
         return new Ast.InterfaceDecl(name, methods);
@@ -160,9 +161,36 @@ public class Parser {
     private Ast.MethodDecl parseMethod() {
         boolean isPrivate = parseVisibility();
         String name = expect(Type.IDENT).text;
-        List<String> params = parseParamList();
+        ParamSpec params = parseTypedParamList();
+        String returnType = parseReturnType();
         List<Ast.Stmt> body = parseBlockHeaderless();
-        return new Ast.MethodDecl(name, isPrivate, params, body);
+        return new Ast.MethodDecl(name, isPrivate, params.names, params.types, returnType, body);
+    }
+
+    private record ParamSpec(List<String> names, List<String> types) {}
+
+    // OW method parameters support optional type annotations:
+    //   fn reserve(quantity int) -> bool
+    private ParamSpec parseTypedParamList() {
+        expect(Type.LPAREN);
+        List<String> names = new ArrayList<>();
+        List<String> types = new ArrayList<>();
+        if (!check(Type.RPAREN)) {
+            do {
+                names.add(expect(Type.IDENT).text);
+                types.add(check(Type.IDENT) ? expect(Type.IDENT).text : null);
+            } while (match(Type.COMMA));
+        }
+        expect(Type.RPAREN);
+        return new ParamSpec(names, types);
+    }
+
+    private String parseReturnType() {
+        if (match(Type.MINUS)) {
+            expect(Type.GT);
+            return expect(Type.IDENT).text;
+        }
+        return null;
     }
 
     // model Name:

@@ -265,6 +265,21 @@ cycles produce errors before program execution. Inherited public methods count.
 This strengthens module contracts used by the companion
 [flOW framework](https://github.com/OW-Programing-Language/flOW---OW-Modular-Framework).
 
-**Current limit:** interface signatures in OW specify method names and arity,
-not parameter/return types. This adds load-time signature conformance, not an
-OCaml module compiler or full static type inference.
+**Typed method signatures:** Add optional parameter and return annotations in
+interfaces and class methods:
+
+```ow
+interface Storage:
+  fn put(key string, value int) -> bool
+class MemoryStorage(Storage):
+  fn put(key string, value int) -> bool:
+    return: true
+```
+
+OW rejects mismatched parameter or return types before `main`, and checks
+actual arguments and results at method call boundaries. Annotations are
+optional, so existing OW programs continue working.
+
+**Current limit:** This validates explicitly declared method signatures at
+interpreter load time. It is not an OCaml module compiler, abstract type system
+or full static inference engine.
