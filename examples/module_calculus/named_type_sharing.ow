@@ -1,0 +1,24 @@
+# This named module is an alias of First.token, not a fresh abstract type.
+module_type BOX:
+  type token
+  fn wrap(x int) -> token
+  fn unwrap(x token) -> int
+
+module First: BOX
+  type token: int
+  fn wrap(x int) -> token:
+    return: x
+  fn unwrap(x token) -> int:
+    return: x
+
+module Alias: BOX with_type token = First.token:
+  type token: First.token
+  fn wrap(x int) -> token:
+    return: First.wrap(x)
+  fn unwrap(x token) -> int:
+    return: First.unwrap(x)
+
+main:
+  call: assert(Alias.unwrap(First.wrap(8)) == 8, "shared identity")
+  call: assert(First.unwrap(Alias.wrap(12)) == 12, "reverse shared identity")
+  print: "PASS named module path equality"

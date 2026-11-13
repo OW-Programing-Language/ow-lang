@@ -101,15 +101,21 @@ public class Ast {
         public final String name, signature;
         public final List<MethodDecl> methods;
         public final Map<String, String> typeAliases;
+        public final Map<String, String> typeSharing;
         public ModuleDecl(String name, String signature, List<MethodDecl> methods) {
-            this(name, signature, methods, Map.of());
+            this(name, signature, methods, Map.of(), Map.of());
         }
         public ModuleDecl(String name, String signature, List<MethodDecl> methods,
                           Map<String, String> typeAliases) {
+            this(name, signature, methods, typeAliases, Map.of());
+        }
+        public ModuleDecl(String name, String signature, List<MethodDecl> methods,
+                          Map<String, String> typeAliases, Map<String, String> typeSharing) {
             this.name = name;
             this.signature = signature;
             this.methods = methods;
             this.typeAliases = typeAliases;
+            this.typeSharing = typeSharing;
         }
     }
 

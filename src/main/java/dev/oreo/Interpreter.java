@@ -193,7 +193,10 @@ public class Interpreter {
         for (Ast.ModuleDecl mod : program.modules) {
             Ast.ModuleTypeDecl signature = moduleTypes.get(mod.signature);
             for (String underlying : mod.typeAliases.values()) {
-                requireKnownType(underlying, mod.name + " type member");
+                // Named path aliases were resolved and cycle-checked by the module checker.
+                if (!underlying.contains(".")) {
+                    requireKnownType(underlying, mod.name + " type member");
+                }
             }
             for (Ast.MethodDecl method : mod.methods) {
                 for (String type : method.paramTypes) {
@@ -659,7 +662,8 @@ public class Interpreter {
         }
         if (implementation.contains(".")) {
             String[] parts = implementation.split("\\.", 2);
-            Object supplied = module.captured.get(parts[0]);
+            Object supplied = module.captured.containsKey(parts[0])
+                    ? module.captured.get(parts[0]) : globals.get(parts[0]);
             if (!(supplied instanceof OwModule dependent)) {
                 throw new RuntimeException("Unbound module path " + implementation + " in " + module.name);
             }
@@ -671,11 +675,22 @@ public class Interpreter {
     /** Manifest type representation, potentially exposed through a dependent path. */
     private String publicRepresentation(OwModule module, String member) {
         Ast.ModuleTypeDecl signature = moduleTypes.get(module.signature);
-        if (signature.manifestTypes.containsKey(member)) return signature.manifestTypes.get(member);
+        if (signature.manifestTypes.containsKey(member)) {
+            String manifest = signature.manifestTypes.get(member);
+            if (!manifest.contains(".")) return manifest;
+            String[] parts = manifest.split("\\.", 2);
+            Object dependency = module.captured.containsKey(parts[0])
+                    ? module.captured.get(parts[0]) : globals.get(parts[0]);
+            if (!(dependency instanceof OwModule named)) {
+                throw new RuntimeException("Unbound manifest type path " + manifest);
+            }
+            return publicRepresentation(named, parts[1]);
+        }
         String implementation = module.typeAliases.get(member);
         if (implementation != null && implementation.contains(".")) {
             String[] parts = implementation.split("\\.", 2);
-            Object supplied = module.captured.get(parts[0]);
+            Object supplied = module.captured.containsKey(parts[0])
+                    ? module.captured.get(parts[0]) : globals.get(parts[0]);
             if (!(supplied instanceof OwModule dependent)) {
                 throw new RuntimeException("Unbound module path " + implementation + " in " + module.name);
             }

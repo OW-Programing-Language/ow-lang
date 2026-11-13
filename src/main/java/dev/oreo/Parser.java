@@ -138,7 +138,7 @@ public class Parser {
                 String member = expect(Type.IDENT).text;
                 abstractTypes.add(member);
                 if (match(Type.COLON)) {
-                    manifestTypes.put(member, expect(Type.IDENT).text);
+                    manifestTypes.put(member, parseTypePath());
                 }
                 expect(Type.NEWLINE);
             } else if (matchIdent("fn")) {
@@ -162,10 +162,21 @@ public class Parser {
         String name = expect(Type.IDENT).text;
         expect(Type.COLON);
         String signature = expect(Type.IDENT).text;
+        Map<String, String> sharing = new LinkedHashMap<>();
+        while (matchIdent("with_type")) {
+            String member = expect(Type.IDENT).text;
+            expect(Type.ASSIGN);
+            String path = parseTypePath();
+            if (sharing.putIfAbsent(member, path) != null)
+                throw err("duplicate with_type constraint " + member);
+        }
+        // A trailing colon is accepted when a with_type constraint is present.
+        // Existing 'module Name: SIGNATURE' syntax remains unchanged.
+        if (!sharing.isEmpty()) match(Type.COLON);
         ModuleMembers members = parseModuleMethods();
         if (members.returnedFunctor != null)
             throw err("module may not return a functor");
-        return new Ast.ModuleDecl(name, signature, members.methods, members.typeAliases);
+        return new Ast.ModuleDecl(name, signature, members.methods, members.typeAliases, sharing);
     }
 
     // functor_type FACTORY(INPUT) -> OUTPUT

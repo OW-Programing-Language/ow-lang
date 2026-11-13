@@ -131,12 +131,19 @@ public final class StaticModuleValueChecker {
         Ast.ModuleTypeDecl declaration = signatures.get(module.signature);
         if (declaration == null) return null;
         String manifest = declaration.manifestTypes.get(member);
-        if (manifest != null) return ValueType.primitive(manifest);
+        if (manifest != null) {
+            if (!manifest.contains(".")) return ValueType.primitive(manifest);
+            String[] path = manifest.split("\\.", 2);
+            ModuleRef declared = module.captured.containsKey(path[0])
+                    ? module.captured.get(path[0]) : moduleValues.get(path[0]);
+            return declared == null ? null : typeMember(declared, path[1]);
+        }
         String alias = module.aliases.get(member);
         if (alias == null) return null;
         if (alias.contains(".")) {
             String[] path = alias.split("\\.", 2);
-            ModuleRef dependency = module.captured.get(path[0]);
+            ModuleRef dependency = module.captured.containsKey(path[0])
+                    ? module.captured.get(path[0]) : moduleValues.get(path[0]);
             return dependency == null ? null : typeMember(dependency, path[1]);
         }
         return ValueType.opaque(module.identity + "." + member);

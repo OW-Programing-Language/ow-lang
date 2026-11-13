@@ -1,0 +1,24 @@
+module_type BOX:
+  type token
+  fn wrap(x int) -> token
+  fn unwrap(x token) -> int
+module First: BOX
+  type token: int
+  fn wrap(x int) -> token:
+    return: x
+  fn unwrap(x token) -> int:
+    return: x
+module Second: BOX
+  type token: int
+  fn wrap(x int) -> token:
+    return: x
+  fn unwrap(x token) -> int:
+    return: x
+module Alias: BOX with_type token = First.token:
+  type token: First.token
+  fn wrap(x int) -> token:
+    return: First.wrap(x)
+  fn unwrap(x token) -> int:
+    return: First.unwrap(x)
+main:
+  print: Alias.unwrap(Second.wrap(3))
