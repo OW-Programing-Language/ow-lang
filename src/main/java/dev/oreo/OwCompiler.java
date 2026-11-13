@@ -21,26 +21,10 @@ public class OwCompiler {
     }
 
     public void compileToExe(Path inputOw, Path outputExe) throws Exception {
-        // Parse all imported files and validate module signatures at build time.
-        // This never executes main or invokes the target toolchain.
-        Ast.Program program = ModuleImplementationExpander.expand(Loader.load(inputOw));
-        ModuleTypeChecker.check(program);
-
-        // The current LLVM backend does not lower first-class module values.
-        // Fail explicitly rather than silently compiling a program that drops
-        // its module declarations or calls.
-        if (!program.moduleTypes.isEmpty() || !program.modules.isEmpty() ||
-            !program.functors.isEmpty() || !program.functorTypes.isEmpty() ||
-            !program.moduleAliases.isEmpty()) {
-            throw new UnsupportedOperationException(
-                    "Native LLVM code generation does not yet support OW module/functor " +
-                    "values. Module signatures were checked; use 'ow run' to execute " +
-                    "or 'ow check' to verify without execution.");
-        }
-
-        // 2) generate LLVM IR
+        // Front end checks every native module before AOT monomorphization.
+        // Dynamic packages and types outside the i32 subset are rejected.
         String moduleName = outputExe.getFileName().toString().replace('.', '_');
-        String ir = new LlvmIrGen().generate(program, moduleName);
+        String ir = llvmIr(inputOw, moduleName);
 
         // 3) write .ll next to exe
         Path llPath = outputExe.resolveSibling(stripExt(outputExe.getFileName().toString()) + ".ll");
@@ -50,6 +34,18 @@ public class OwCompiler {
         runNativeBuild(llPath, outputExe);
 
         // optional: keep .ll (we keep it by default)
+    }
+
+    public String llvmIr(Path inputOw, String moduleName) throws Exception {
+        Ast.Program program = ModuleImplementationExpander.expand(Loader.load(inputOw));
+        ModuleTypeChecker.check(program);
+        Ast.Program lowered = NativeModuleLlvmLowerer.lower(program);
+        return new LlvmIrGen().generate(lowered, moduleName);
+    }
+
+    public void emitLlvm(Path inputOw, Path llFile) throws Exception {
+        String moduleName = llFile.getFileName().toString().replace('.', '_');
+        Files.writeString(llFile, llvmIr(inputOw, moduleName), StandardCharsets.UTF_8);
     }
 
     private void runNativeBuild(Path llPath, Path exePath) throws IOException, InterruptedException {

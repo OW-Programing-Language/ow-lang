@@ -30,6 +30,16 @@ public class Main {
                                    Path.of(args[1]).toAbsolutePath());
             }
 
+            case "llvm", "emit-llvm" -> {
+                requireFile(args, "llvm");
+                Path source = Path.of(args[1]);
+                Path output = args.length >= 3
+                        ? Path.of(args[2])
+                        : Path.of(stripExt(source.getFileName().toString()) + ".ll");
+                new OwCompiler().emitLlvm(source, output);
+                System.out.println("LLVM IR: " + output.toAbsolutePath());
+            }
+
             case "build" -> {
                 requireFile(args, "build");
                 Path in = Path.of(args[1]);
@@ -104,7 +114,8 @@ public class Main {
                   ow <file.ow>          Run a program (interpreter)
                   ow run <file.ow>      Run a program (interpreter)
                   ow check <file.ow>    Validate module/functor types without executing main
-                  ow build <file> [out] Compile procedural programs (needs LLVM/Zig)
+                  ow llvm <file> [out]  Generate LLVM IR for the i32/static-module subset
+                  ow build <file> [out] Compile supported OW programs (needs LLVM/Zig)
                   ow package <file>     Bundle an app/game into a launchable .exe + installer
                                         [--name N] [--type gui|console|web] [--out dir] [--icon x.ico]
                   ow ide                Launch OwIDE

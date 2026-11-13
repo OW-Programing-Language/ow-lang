@@ -304,3 +304,25 @@ This supports a statically resolvable module path or functor argument.
 It does not yet reproduce OCaml's full `include struct ... end`,
 arbitrary local structures, recursive module equations or compiler-managed
 first-class module inference.
+
+## LLVM AOT for statically resolved integer module/functor calls
+
+The `ow llvm input.ow output.ll` command now lowers the **static i32
+subset** of native modules and first-order functors to ordinary LLVM
+functions. `ow build` uses the same lowering before invoking the system
+toolchain. A functor application with a known module argument is specialized
+at compile time; qualified module paths, aliases and implementation-level
+`include` work where the exposed methods use `int` arguments and returns.
+
+```sh
+ow llvm examples/module_calculus/native_llvm.ow /tmp/native.ll
+clang /tmp/native.ll -o /tmp/native
+/tmp/native   # prints 14
+```
+
+This is **not general native compilation of OCaml modules**.
+It intentionally rejects abstract type representations, arbitrary
+first-class packages, dynamic module dispatch, higher-order functor
+values and non-`int` module export types. Runtime module semantics remain
+available with `ow run`. The IR can be tested without installing Zig or a
+Windows SDK using the `llvm` command.

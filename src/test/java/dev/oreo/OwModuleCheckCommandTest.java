@@ -70,7 +70,7 @@ public class OwModuleCheckCommandTest {
         assertTrue(error.getMessage().contains(file.getFileName() + ":9:7"));
     }
 
-    @Test public void nativeBuildDoesNotSilentlyDropModuleDeclarations() throws Exception {
+    @Test public void nativeBuildLowersStaticIntModulesWithoutDroppingCalls() throws Exception {
         Path file = source("""
                 module_type API:
                   fn get() -> int
@@ -80,11 +80,26 @@ public class OwModuleCheckCommandTest {
                 main:
                   print: Value.get()
                 """);
-        Path output = file.resolveSibling("should-not-compile.exe");
+        String ir = new OwCompiler().llvmIr(file, "native_static_test");
+        assertTrue(ir.contains("define i32 @__ow_module_"));
+        assertTrue(ir.contains("call i32 @__ow_module_"));
+        assertTrue(ir.contains("ret i32 3"));
+    }
+
+    @Test public void nativeBuildRejectsFirstClassPackagesRatherThanDroppingThem() throws Exception {
+        Path file = source("""
+                module_type API:
+                  fn get() -> int
+                module Value: API
+                  fn get() -> int:
+                    return: 3
+                main:
+                  set packed: pack(Value, "API")
+                  print: 1
+                """);
         UnsupportedOperationException error = assertThrows(UnsupportedOperationException.class,
-                () -> new OwCompiler().compileToExe(file, output));
-        assertTrue(error.getMessage().contains("does not yet support OW module/functor"));
-        assertFalse(Files.exists(output));
+                () -> new OwCompiler().llvmIr(file, "native_dynamic_unsupported"));
+        assertTrue(error.getMessage().contains("first-class module package values"));
     }
 
     @Test public void moduleCheckerRejectsImportCycleWithFileAndColumn() throws Exception {
