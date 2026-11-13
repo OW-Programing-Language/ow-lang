@@ -668,7 +668,7 @@ public class Interpreter {
             if (paramType != null && module.typeAliases.containsKey(paramType)) {
                 String representationType = publicRepresentation(module, paramType);
                 if (representationType != null) {
-                    checkType(representationType, value, "manifest type " + module.name + "." + paramType);
+                    checkType(representationType, value, "manifest type " + signature.name + "." + paramType);
                 } else {
                     String expectedIdentity = abstractIdentity(module, paramType);
                     if (!(value instanceof OwOpaque opaque) ||
