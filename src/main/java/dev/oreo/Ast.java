@@ -122,6 +122,7 @@ public class Ast {
         public final List<String> abstractTypes;
         public final Map<String, String> manifestTypes;
         public final List<String> includes;
+        public final Map<String, String> nestedModules;
         public final SourceSpan span;
         public ModuleTypeDecl(String name, List<MethodSig> methods) {
             this(name, methods, List.of(), Map.of());
@@ -139,11 +140,17 @@ public class Ast {
         }
         public ModuleTypeDecl(String name, List<MethodSig> methods, List<String> abstractTypes,
                               Map<String, String> manifestTypes, List<String> includes, SourceSpan span) {
+            this(name, methods, abstractTypes, manifestTypes, includes, Map.of(), span);
+        }
+        public ModuleTypeDecl(String name, List<MethodSig> methods, List<String> abstractTypes,
+                              Map<String, String> manifestTypes, List<String> includes,
+                              Map<String, String> nestedModules, SourceSpan span) {
             this.name = name;
             this.methods = methods;
             this.abstractTypes = abstractTypes;
             this.manifestTypes = manifestTypes;
             this.includes = includes;
+            this.nestedModules = nestedModules;
             this.span = span;
         }
     }
@@ -155,6 +162,9 @@ public class Ast {
         public final Map<String, String> typeAliases;
         public final Map<String, String> typeSharing;
         public final List<String> includes;
+        public final List<ModuleDecl> nestedModules;
+        public final List<ModuleTypeDecl> nestedSignatures;
+        public final Map<String, String> lexicalChildren;
         public final SourceSpan span;
         public ModuleDecl(String name, String signature, List<MethodDecl> methods) {
             this(name, signature, methods, Map.of(), Map.of());
@@ -175,12 +185,23 @@ public class Ast {
         public ModuleDecl(String name, String signature, List<MethodDecl> methods,
                           Map<String, String> typeAliases, Map<String, String> typeSharing,
                           List<String> includes, SourceSpan span) {
+            this(name, signature, methods, typeAliases, typeSharing, includes,
+                 List.of(), List.of(), Map.of(), span);
+        }
+        public ModuleDecl(String name, String signature, List<MethodDecl> methods,
+                          Map<String, String> typeAliases, Map<String, String> typeSharing,
+                          List<String> includes, List<ModuleDecl> nestedModules,
+                          List<ModuleTypeDecl> nestedSignatures,
+                          Map<String, String> lexicalChildren, SourceSpan span) {
             this.name = name;
             this.signature = signature;
             this.methods = methods;
             this.typeAliases = typeAliases;
             this.typeSharing = typeSharing;
             this.includes = includes;
+            this.nestedModules = nestedModules;
+            this.nestedSignatures = nestedSignatures;
+            this.lexicalChildren = lexicalChildren;
             this.span = span;
         }
     }

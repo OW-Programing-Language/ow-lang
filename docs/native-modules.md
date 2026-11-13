@@ -326,3 +326,35 @@ first-class packages, dynamic module dispatch, higher-order functor
 values and non-`int` module export types. Runtime module semantics remain
 available with `ow run`. The IR can be tested without installing Zig or a
 Windows SDK using the `llvm` command.
+
+## Lexically nested named module implementations
+
+Native module bodies may now contain nested `module_type` and `module`
+declarations. A parent `module_type` explicitly declares visible child
+modules, so private children are accessible to the owner's methods but
+cannot be selected or aliased from outside the owner.
+
+```ow
+module_type ITEM:
+  fn value() -> int
+module_type SHOP:
+  module Inventory: ITEM
+  fn total() -> int
+
+module Store: SHOP
+  module Inventory: ITEM
+    fn value() -> int:
+      return: 12
+  fn total() -> int:
+    return: Inventory.value()
+```
+
+Nested signatures resolve within their enclosing lexical scope. Nested
+implementations are normalized to qualified names for semantic checking,
+but the interpreter attaches them to their owning module with signature
+sealing rather than creating unrelated public namespace aliases.
+
+This adds lexical nested **named modules and signatures** with explicit
+public/private visibility. It does not yet support mutually recursive
+module bindings, nested functor declarations/anonymous structs, local
+`include struct ... end`, or the complete OCaml module grammar.

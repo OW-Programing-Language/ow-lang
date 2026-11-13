@@ -80,6 +80,7 @@ public class Interpreter {
         public final String identity;
         public final Map<String, Ast.MethodDecl> definitions;
         public final Map<String, Object> captured;
+        public final Map<String, OwModule> children = new LinkedHashMap<>();
         public final Map<String, String> typeAliases;
         OwModule(String name, String signature, List<Ast.MethodDecl> methods,
                  Map<String, Object> captured, Map<String, String> typeAliases,
@@ -228,8 +229,8 @@ public class Interpreter {
             if (globals.containsKey(mod.name)) {
                 throw new RuntimeException("Duplicate module global " + mod.name);
             }
-            OwModule nativeValue = new OwModule(mod.name, mod.signature, mod.methods, Map.of(),
-                                                mod.typeAliases, mod.name);
+            OwModule nativeValue = new OwModule(mod.name, mod.signature, mod.methods,
+                                                new HashMap<>(), mod.typeAliases, mod.name);
             if (mod.name.contains(".")) installModuleAlias(mod.name, nativeValue);
             else globals.put(mod.name, nativeValue);
         }
@@ -272,12 +273,37 @@ public class Interpreter {
         }
     }
 
+    private Object moduleChild(Object target, String name) {
+        if (target instanceof OwNamespace namespace) return namespace.members.get(name);
+        if (target instanceof OwModule module) return module.children.get(name);
+        return null;
+    }
+
+    private void insertModuleChild(Object parent, String name, Object child, String path) {
+        if (parent instanceof OwNamespace namespace) {
+            if (namespace.members.putIfAbsent(name, child) != null)
+                throw new RuntimeException("Duplicate module path " + path);
+            return;
+        }
+        if (parent instanceof OwModule module) {
+            if (!(child instanceof OwModule nested))
+                throw new RuntimeException("A native module child must be a native module");
+            if (module.children.putIfAbsent(name, nested) != null)
+                throw new RuntimeException("Duplicate lexical module " + path);
+            // The owner can resolve its lexical child locally, regardless of
+            // whether the public signature exports that child.
+            module.captured.put(name, nested);
+            return;
+        }
+        throw new RuntimeException("Module namespace conflicts with " + path);
+    }
+
     private Object resolveModulePath(String path) {
         String[] parts = path.split("\\.");
         Object current = globals.get(parts[0]);
         for (int i = 1; i < parts.length; i++) {
-            if (!(current instanceof OwNamespace namespace)) return null;
-            current = namespace.members.get(parts[i]);
+            current = moduleChild(current, parts[i]);
+            if (current == null) return null;
         }
         return current;
     }
@@ -285,33 +311,25 @@ public class Interpreter {
     private void installModuleAlias(String path, Object value) {
         String[] parts = path.split("\\.");
         if (parts.length == 1) {
-            if (globals.containsKey(path)) throw new RuntimeException("Duplicate module alias " + path);
+            if (globals.containsKey(path))
+                throw new RuntimeException("Duplicate module alias " + path);
             globals.put(path, value);
             return;
         }
-        Object existing = globals.get(parts[0]);
-        if (existing == null) {
-            existing = new OwNamespace();
-            globals.put(parts[0], existing);
+        Object current = globals.get(parts[0]);
+        if (current == null) {
+            current = new OwNamespace();
+            globals.put(parts[0], current);
         }
-        if (!(existing instanceof OwNamespace)) {
-            throw new RuntimeException("Module namespace conflicts with " + parts[0]);
-        }
-        OwNamespace current = (OwNamespace) existing;
         for (int i = 1; i < parts.length - 1; i++) {
-            Object child = current.members.get(parts[i]);
+            Object child = moduleChild(current, parts[i]);
             if (child == null) {
                 child = new OwNamespace();
-                current.members.put(parts[i], child);
+                insertModuleChild(current, parts[i], child, path);
             }
-            if (!(child instanceof OwNamespace)) {
-                throw new RuntimeException("Module namespace conflicts with " + path);
-            }
-            current = (OwNamespace) child;
+            current = child;
         }
-        if (current.members.putIfAbsent(parts[parts.length - 1], value) != null) {
-            throw new RuntimeException("Duplicate module alias " + path);
-        }
+        insertModuleChild(current, parts[parts.length - 1], value, path);
     }
 
     /** Stops a running UI (if any), releasing a blocked ui_run call. Safe to call from any thread. */
@@ -548,6 +566,15 @@ public class Interpreter {
                 if (!namespace.members.containsKey(fa.field))
                     throw new RuntimeException("Unknown nested module " + fa.field);
                 return namespace.members.get(fa.field);
+            }
+            if (target instanceof OwModule module) {
+                Ast.ModuleTypeDecl type = moduleTypes.get(module.signature);
+                if (type == null || !type.nestedModules.containsKey(fa.field) ||
+                        !module.children.containsKey(fa.field)) {
+                    throw new RuntimeException("Private or unknown nested module " +
+                            module.name + "." + fa.field);
+                }
+                return module.children.get(fa.field);
             }
             if (target instanceof OwRecord rec) {
                 return rec.get(fa.field);
@@ -1361,8 +1388,11 @@ public class Interpreter {
             throw new RuntimeException("unpack cannot widen a sealed module from " +
                     packed.exposedSignature + " to " + target);
         OwModule original = packed.original;
-        return new OwModule(original.name, target, new ArrayList<>(original.definitions.values()),
-                            original.captured, original.typeAliases, original.identity);
+        OwModule view = new OwModule(original.name, target,
+                new ArrayList<>(original.definitions.values()),
+                original.captured, original.typeAliases, original.identity);
+        view.children.putAll(original.children);
+        return view;
     }
 
     private Ast.Expr arg(Ast.CallExpr call, int i, int expected) {

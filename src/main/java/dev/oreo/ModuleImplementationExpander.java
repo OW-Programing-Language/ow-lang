@@ -30,6 +30,7 @@ public final class ModuleImplementationExpander {
     }
 
     public static Ast.Program expand(Ast.Program program) {
+        program = LexicalModuleNormalizer.normalize(program);
         boolean required = program.modules.stream().anyMatch(m -> !m.includes.isEmpty()) ||
                 program.functors.stream().anyMatch(f -> !f.includes.isEmpty());
         if (!required) return program;
@@ -70,7 +71,7 @@ public final class ModuleImplementationExpander {
         active.remove(name);
         Ast.ModuleDecl result = new Ast.ModuleDecl(module.name, module.signature,
                 members.methods, members.typeAliases, module.typeSharing, List.of(),
-                module.span);
+                List.of(), List.of(), module.lexicalChildren, module.span);
         expanded.put(name, result);
         return result;
     }

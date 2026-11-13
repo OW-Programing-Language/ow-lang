@@ -45,10 +45,18 @@ public final class ModuleTypeChecker {
         Map<String, Ast.MethodSig> methods = new LinkedHashMap<>();
         Set<String> types = new LinkedHashSet<>();
         Map<String, String> manifests = new LinkedHashMap<>();
+        Map<String, String> nested = new LinkedHashMap<>();
 
         for (String included : declaration.includes) {
             Ast.ModuleTypeDecl inherited = expandSignature(included, source, cache, active);
             for (String member : inherited.abstractTypes) types.add(member);
+            for (Map.Entry<String, String> entry : inherited.nestedModules.entrySet()) {
+                String earlier = nested.putIfAbsent(entry.getKey(), entry.getValue());
+                if (earlier != null && !earlier.equals(entry.getValue())) {
+                    throw new RuntimeException("Conflicting included nested module " +
+                            name + "." + entry.getKey());
+                }
+            }
             for (Map.Entry<String, String> entry : inherited.manifestTypes.entrySet()) {
                 String previous = manifests.putIfAbsent(entry.getKey(), entry.getValue());
                 if (previous != null && !previous.equals(entry.getValue())) {
@@ -78,6 +86,13 @@ public final class ModuleTypeChecker {
                         name + "." + entry.getKey());
             }
         }
+        for (Map.Entry<String, String> entry : declaration.nestedModules.entrySet()) {
+            String earlier = nested.putIfAbsent(entry.getKey(), entry.getValue());
+            if (earlier != null && !earlier.equals(entry.getValue())) {
+                throw new RuntimeException("Conflicting nested module signature " +
+                        name + "." + entry.getKey());
+            }
+        }
         Set<String> declaredMethods = new HashSet<>();
         for (Ast.MethodSig method : declaration.methods) {
             if (!declaredMethods.add(method.name)) {
@@ -91,7 +106,7 @@ public final class ModuleTypeChecker {
         }
         active.remove(name);
         Ast.ModuleTypeDecl expanded = new Ast.ModuleTypeDecl(name, new ArrayList<>(methods.values()),
-                new ArrayList<>(types), manifests, declaration.span);
+                new ArrayList<>(types), manifests, List.of(), nested, declaration.span);
         cache.put(name, expanded);
         return expanded;
     }
@@ -145,7 +160,7 @@ public final class ModuleTypeChecker {
         for (Ast.ModuleDecl module : program.modules) {
             if (!module.name.contains(".")) continue;
             String root = module.name.substring(0, module.name.indexOf('.'));
-            if (roots.contains(root)) {
+            if (roots.contains(root) && !isLexicalChild(module.name, modules)) {
                 throw new RuntimeException("Module namespace " + root +
                         " conflicts with a module declaration");
             }
@@ -155,6 +170,35 @@ public final class ModuleTypeChecker {
             resolveAlias(alias, modules, aliases, resolved, new LinkedHashSet<>());
         }
         return resolved;
+    }
+
+    private static boolean isLexicalChild(String path,
+                                          Map<String, Ast.ModuleDecl> modules) {
+        int last = path.lastIndexOf('.');
+        if (last < 0) return false;
+        Ast.ModuleDecl parent = modules.get(path.substring(0, last));
+        return parent != null && path.equals(parent.lexicalChildren.get(path.substring(last + 1)));
+    }
+
+    private static void requirePublicModulePath(String path,
+            Map<String, Ast.ModuleDecl> modules,
+            Map<String, Ast.ModuleTypeDecl> signatures) {
+        int dot = path.indexOf('.');
+        while (dot >= 0) {
+            String parentName = path.substring(0, dot);
+            int next = path.indexOf('.', dot + 1);
+            String childName = next < 0
+                    ? path.substring(dot + 1) : path.substring(dot + 1, next);
+            Ast.ModuleDecl parent = modules.get(parentName);
+            if (parent != null && parent.lexicalChildren.containsKey(childName)) {
+                Ast.ModuleTypeDecl publicType = signatures.get(parent.signature);
+                if (publicType == null || !publicType.nestedModules.containsKey(childName)) {
+                    throw new RuntimeException("Private nested module " + parentName +
+                            "." + childName + " is not exported by " + parent.signature);
+                }
+            }
+            dot = next;
+        }
     }
 
     private static String resolveAlias(String name, Map<String, Ast.ModuleDecl> modules,
@@ -217,6 +261,20 @@ public final class ModuleTypeChecker {
             validateNamedModuleSharing(mod, namedModules, signatures);
             validateMethods(mod.name, mod.signature, mod.methods, mod.typeAliases,
                             signatures, mod.span);
+            Ast.ModuleTypeDecl signature = signatures.get(mod.signature);
+            for (Map.Entry<String, String> child : signature.nestedModules.entrySet()) {
+                String qualified = mod.lexicalChildren.get(child.getKey());
+                Ast.ModuleDecl nested = qualified == null ? null : namedModules.get(qualified);
+                if (nested == null ||
+                    !matches(signatures.get(nested.signature), signatures.get(child.getValue()))) {
+                    throw new RuntimeException("Module " + mod.name +
+                            " is missing required nested export " + child.getKey() +
+                            ": " + child.getValue());
+                }
+            }
+        }
+        for (Ast.ModuleAliasDecl alias : program.moduleAliases) {
+            requirePublicModulePath(alias.target, namedModules, signatures);
         }
         for (Ast.ModuleAliasDecl alias : program.moduleAliases) {
             if (!alias.name.contains(".") && !reserved.add(alias.name)) {
@@ -633,6 +691,9 @@ public final class ModuleTypeChecker {
         Map<String, Ast.MethodSig> exposed = new HashMap<>();
         for (Ast.MethodSig method : actual.methods) exposed.put(method.name, method);
         if (!actual.abstractTypes.containsAll(required.abstractTypes)) return false;
+        for (Map.Entry<String, String> child : required.nestedModules.entrySet()) {
+            if (!child.getValue().equals(actual.nestedModules.get(child.getKey()))) return false;
+        }
         for (Map.Entry<String, String> member : required.manifestTypes.entrySet()) {
             if (!member.getValue().equals(actual.manifestTypes.get(member.getKey()))) return false;
         }

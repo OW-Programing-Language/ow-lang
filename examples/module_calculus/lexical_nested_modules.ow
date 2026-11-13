@@ -1,0 +1,29 @@
+# Lexically nested implementations with explicit nested signature exports.
+module_type ITEM:
+  fn value() -> int
+
+module_type SHOP:
+  module Inventory: ITEM
+  fn total() -> int
+
+module Store: SHOP
+  # Local signature is private to the enclosing lexical module.
+  module_type INTERNAL:
+    fn secret() -> int
+
+  module Inventory: ITEM
+    fn value() -> int:
+      return: 12
+
+  module Internal: INTERNAL
+    fn secret() -> int:
+      return: 8
+
+  fn total() -> int:
+    return: Inventory.value() + Internal.secret()
+
+main:
+  call: assert(Store.Inventory.value() == 12, "exported child")
+  call: assert(Store.total() == 20, "lexical private child")
+  # Store.Internal.secret() is forbidden by SHOP's signature.
+  print: "PASS lexical nested modules + signature sealing"
