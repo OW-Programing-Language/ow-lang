@@ -1,0 +1,38 @@
+module_type SOURCE:
+  fn get() -> int
+
+module Source: SOURCE
+  fn get() -> int:
+    return: 0
+
+module_type BOX:
+  type token
+  fn wrap(x int) -> token
+  fn unwrap(x token) -> int
+
+# Applicative: same functor and same stable argument module yield
+# the same abstract type identity for separately applied results.
+functor MakeBox(S: SOURCE) -> BOX:
+  type token: int
+  fn wrap(x int) -> token:
+    return: x + S.get()
+  fn unwrap(x token) -> int:
+    return: x
+
+# Explicitly generative: each application produces a fresh token type.
+functor_gen FreshBox(S: SOURCE) -> BOX:
+  type token: int
+  fn wrap(x int) -> token:
+    return: x + S.get()
+  fn unwrap(x token) -> int:
+    return: x
+
+main:
+  set first: MakeBox(Source)
+  set second: MakeBox(Source)
+  call: assert(second.unwrap(first.wrap(12)) == 12, "applicative type sharing")
+  set uniqueA: FreshBox(Source)
+  set uniqueB: FreshBox(Source)
+  call: assert(uniqueA.unwrap(uniqueA.wrap(9)) == 9, "generative A")
+  call: assert(uniqueB.unwrap(uniqueB.wrap(9)) == 9, "generative B")
+  print: "PASS applicative and generative functor instances"

@@ -1,0 +1,19 @@
+module_type SOURCE:
+  fn get() -> int
+module Source: SOURCE
+  fn get() -> int:
+    return: 0
+module_type BOX:
+  type token
+  fn wrap(x int) -> token
+  fn unwrap(x token) -> int
+functor_gen FreshBox(S: SOURCE) -> BOX:
+  type token: int
+  fn wrap(x int) -> token:
+    return: x
+  fn unwrap(x token) -> int:
+    return: x
+main:
+  set a: FreshBox(Source)
+  set b: FreshBox(Source)
+  print: b.unwrap(a.wrap(1))

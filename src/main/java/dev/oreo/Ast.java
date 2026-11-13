@@ -95,19 +95,26 @@ public class Ast {
         public final String name, argument, inputSignature, outputSignature;
         public final List<MethodDecl> methods;
         public final Map<String, String> typeAliases;
+        public final boolean generative;
         public FunctorDecl(String name, String argument, String inputSignature,
                            String outputSignature, List<MethodDecl> methods) {
-            this(name, argument, inputSignature, outputSignature, methods, Map.of());
+            this(name, argument, inputSignature, outputSignature, methods, Map.of(), false);
         }
         public FunctorDecl(String name, String argument, String inputSignature,
                            String outputSignature, List<MethodDecl> methods,
                            Map<String, String> typeAliases) {
+            this(name, argument, inputSignature, outputSignature, methods, typeAliases, false);
+        }
+        public FunctorDecl(String name, String argument, String inputSignature,
+                           String outputSignature, List<MethodDecl> methods,
+                           Map<String, String> typeAliases, boolean generative) {
             this.name = name;
             this.argument = argument;
             this.inputSignature = inputSignature;
             this.outputSignature = outputSignature;
             this.methods = methods;
             this.typeAliases = typeAliases;
+            this.generative = generative;
         }
     }
 

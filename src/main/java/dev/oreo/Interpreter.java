@@ -97,6 +97,7 @@ public class Interpreter {
 
     private final Map<String, Ast.ModuleTypeDecl> moduleTypes = new LinkedHashMap<>();
     private final Map<String, Ast.FunctorDecl> moduleFunctors = new LinkedHashMap<>();
+    private long generativeSerial = 0;
 
     private final PrintStream out;
     private final InputProvider inputProvider;
@@ -541,9 +542,11 @@ public class Interpreter {
                     throw new RuntimeException("Functor " + functor.name + " requires " +
                             functor.inputSignature + ", got " + mod.signature);
                 }
+                String identity = functor.generative
+                        ? functor.name + "#fresh" + (++generativeSerial)
+                        : functor.name + "(" + mod.identity + ")";
                 return new OwModule(functor.name + "(" + mod.name + ")", functor.outputSignature,
-                        functor.methods, Map.of(functor.argument, mod), functor.typeAliases,
-                        functor.name + "(" + mod.identity + ")");
+                        functor.methods, Map.of(functor.argument, mod), functor.typeAliases, identity);
             }
             if (isBuiltin(call.name)) {
                 return evalBuiltin(call, env);

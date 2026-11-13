@@ -27,9 +27,11 @@ jobs:
         run: java -jar target/OwIDE.jar run examples/module_calculus/main.ow
       - name: Verify opaque abstract type members
         run: java -jar target/OwIDE.jar run examples/module_calculus/abstract_types.ow
+      - name: Verify applicative and generative identities
+        run: java -jar target/OwIDE.jar run examples/module_calculus/functor_identity.ow
       - name: Reject malformed modules, functor arguments, and hidden exports
         run: |
-          for file in tests/module_calculus_*.ow tests/module_abstract_*.ow; do
+          for file in tests/module_calculus_*.ow tests/module_abstract_*.ow tests/module_functor_generative_mismatch.ow; do
             if java -jar target/OwIDE.jar run "$file"; then
               echo "ERROR: invalid module program was accepted: $file"
               exit 1

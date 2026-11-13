@@ -42,7 +42,9 @@ public class Parser {
             } else if (matchIdent("module")) {
                 modules.add(parseModule());
             } else if (matchIdent("functor")) {
-                functors.add(parseFunctor());
+                functors.add(parseFunctor(false));
+            } else if (matchIdent("functor_gen")) {
+                functors.add(parseFunctor(true));
             } else if (matchIdent("model")) {
                 models.add(parseModel());
             } else if (matchIdent("main")) {
@@ -159,7 +161,7 @@ public class Parser {
     // functor Make(Dependency: INPUT) -> OUTPUT:
     //   fn export(args) -> type:
     //     ...
-    private Ast.FunctorDecl parseFunctor() {
+    private Ast.FunctorDecl parseFunctor(boolean generative) {
         String name = expect(Type.IDENT).text;
         expect(Type.LPAREN);
         String argument = expect(Type.IDENT).text;
@@ -172,7 +174,7 @@ public class Parser {
         expect(Type.COLON);
         ModuleMembers members = parseModuleMethods();
         return new Ast.FunctorDecl(name, argument, input, output,
-                                   members.methods, members.typeAliases);
+                                   members.methods, members.typeAliases, generative);
     }
 
     private record ModuleMembers(List<Ast.MethodDecl> methods, Map<String, String> typeAliases) {}
