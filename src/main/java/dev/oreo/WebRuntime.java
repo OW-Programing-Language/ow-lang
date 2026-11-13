@@ -4,6 +4,7 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.net.InetSocketAddress;
@@ -28,6 +29,7 @@ public class WebRuntime {
     private final PrintStream out;
     private final List<Route> routes = new ArrayList<>();
     private HttpServer server;
+    private static final int MAX_BODY_BYTES = 1024 * 1024;
 
     public WebRuntime(Interpreter interp, PrintStream out) {
         this.interp = interp;
@@ -54,7 +56,12 @@ public class WebRuntime {
             method = path.substring(0, sp).trim().toUpperCase();
             path = path.substring(sp + 1).trim();
         }
-        routes.add(new Route(method, splitPath(path), body));
+        List<String> segments = splitPath(path);
+        for (Route route : routes) {
+            if (route.method.equals(method) && route.segments.equals(segments))
+                throw new IllegalArgumentException("Duplicate OW HTTP route: " + spec);
+        }
+        routes.add(new Route(method, segments, body));
     }
 
     public void serve(int port) {
@@ -89,43 +96,84 @@ public class WebRuntime {
     }
 
     private void dispatch(HttpExchange ex) throws IOException {
+        long started = System.nanoTime();
+        int status = 500;
         try {
-            String method = ex.getRequestMethod().toUpperCase();
+            // Middleware always executes before any user route handler.
+            for (RuntimeExtension extension : interp.runtimeExtensions()) {
+                RuntimeExtension.Response blocked = extension.beforeRequest(ex);
+                if (blocked != null) {
+                    status = blocked.status();
+                    send(ex, status, blocked.contentType(), blocked.body());
+                    return;
+                }
+            }
+            String method = ex.getRequestMethod().toUpperCase(java.util.Locale.ROOT);
             List<String> pathSegs = splitPath(ex.getRequestURI().getPath());
-
             Route match = null;
             Interpreter.OwRecord params = new Interpreter.OwRecord();
-            for (Route r : routes) {
+            for (Route route : routes) {
                 Interpreter.OwRecord p = new Interpreter.OwRecord();
-                if (r.method.equals(method) && matches(r.segments, pathSegs, p)) {
-                    match = r;
+                if (route.method.equals(method) && matches(route.segments, pathSegs, p)) {
+                    match = route;
                     params = p;
                     break;
                 }
             }
-
             if (match == null) {
-                send(ex, 404, "text/plain; charset=utf-8", "Not found");
+                status = 404;
+                send(ex, status, "text/plain; charset=utf-8", "Not found");
                 return;
             }
-
-            String body = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            String declared = ex.getRequestHeaders().getFirst("Content-Length");
+            if (declared != null) {
+                try {
+                    if (Long.parseLong(declared) > MAX_BODY_BYTES) {
+                        status = 413;
+                        send(ex, status, "text/plain; charset=utf-8", "Request body too large");
+                        return;
+                    }
+                } catch (NumberFormatException ignored) {
+                    status = 400;
+                    send(ex, status, "text/plain; charset=utf-8", "Invalid content length");
+                    return;
+                }
+            }
+            byte[] rawBody;
+            try (InputStream bodyStream = ex.getRequestBody()) {
+                rawBody = bodyStream.readNBytes(MAX_BODY_BYTES + 1);
+            }
+            if (rawBody.length > MAX_BODY_BYTES) {
+                status = 413;
+                send(ex, status, "text/plain; charset=utf-8", "Request body too large");
+                return;
+            }
             Interpreter.OwRecord req = new Interpreter.OwRecord();
             req.put("method", method);
             req.put("path", ex.getRequestURI().getPath());
             req.put("query", parseQuery(ex.getRequestURI().getRawQuery()));
             req.put("params", params);
-            req.put("body", body);
-
+            req.put("body", new String(rawBody, StandardCharsets.UTF_8));
             Object result = interp.runRouteHandler(match.body, req);
-            writeResponse(ex, result);
-        } catch (RuntimeException err) {
-            out.println("Ow route error: " + err.getMessage());
-            send(ex, 500, "text/plain; charset=utf-8", "Internal server error: " + err.getMessage());
+            status = writeResponse(ex, result);
+        } catch (Exception err) {
+            out.println("OW HTTP request failed (" + err.getClass().getSimpleName() + ")");
+            status = 500;
+            try {
+                send(ex, status, "text/plain; charset=utf-8", "Internal server error");
+            } catch (IOException ignored) { ex.close(); }
+        } finally {
+            long elapsed = System.nanoTime() - started;
+            for (RuntimeExtension extension : interp.runtimeExtensions()) {
+                try { extension.afterRequest(ex, status, elapsed); }
+                catch (RuntimeException ignored) {
+                    out.println("OW HTTP extension afterRequest failed");
+                }
+            }
         }
     }
 
-    private void writeResponse(HttpExchange ex, Object result) throws IOException {
+    private int writeResponse(HttpExchange ex, Object result) throws IOException {
         int status = 200;
         Object body = result;
         if (result instanceof Interpreter.OwResponse resp) {
@@ -136,12 +184,14 @@ public class WebRuntime {
             send(ex, status, "text/plain; charset=utf-8", "");
         } else if (body instanceof Interpreter.OwRecord || body instanceof List<?>) {
             send(ex, status, "application/json; charset=utf-8", Json.write(body));
-        } else if (body instanceof String s) {
-            String ct = s.stripLeading().startsWith("<") ? "text/html; charset=utf-8" : "text/plain; charset=utf-8";
-            send(ex, status, ct, s);
+        } else if (body instanceof String text) {
+            String ct = text.stripLeading().startsWith("<") ?
+                    "text/html; charset=utf-8" : "text/plain; charset=utf-8";
+            send(ex, status, ct, text);
         } else {
             send(ex, status, "text/plain; charset=utf-8", interp.formatValue(body));
         }
+        return status;
     }
 
     private static void send(HttpExchange ex, int status, String contentType, String body) throws IOException {
