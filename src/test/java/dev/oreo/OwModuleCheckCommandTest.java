@@ -95,11 +95,12 @@ public class OwModuleCheckCommandTest {
                     return: 3
                 main:
                   set packed: pack(Value, "API")
+                  set shelf: [packed]
                   print: 1
                 """);
         UnsupportedOperationException error = assertThrows(UnsupportedOperationException.class,
                 () -> new OwCompiler().llvmIr(file, "native_dynamic_unsupported"));
-        assertTrue(error.getMessage().contains("first-class module package values"));
+        assertTrue(error.getMessage().contains("only i32/static module expressions"));
     }
 
     @Test public void moduleCheckerRejectsImportCycleWithFileAndColumn() throws Exception {

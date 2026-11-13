@@ -149,9 +149,9 @@ public class NativeModuleLlvmLowererTest {
                     return: 5
                 main:
                   set packed: pack(M, "API")
-                  print: 0
+                  print: packed
                 """));
-        assertTrue(ex.getMessage().contains("first-class module package values"));
+        assertTrue(ex.getMessage().contains("packed module cannot be stored as an i32 value"));
     }
 
     @Test public void opaqueIntegerModuleCanBeLowered() {
