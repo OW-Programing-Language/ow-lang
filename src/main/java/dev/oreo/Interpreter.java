@@ -539,11 +539,33 @@ public class Interpreter {
         return result;
     }
 
+    /** Ensure typed OW declarations only refer to known primitives or loaded types. */
+    private void requireKnownType(String name, String context) {
+        if (name == null) return;
+        if (Set.of("int", "string", "str", "bool", "boolean", "array", "list", "float", "double")
+                .contains(name)) return;
+        if (classes.containsKey(name) || interfaces.containsKey(name) || enums.containsKey(name)) return;
+        throw new RuntimeException("Unknown type '" + name + "' in " + context);
+    }
+
     /** Reject invalid interface implementations before evaluating the program.
      * OW's interface signatures currently specify method names and arity only;
      * parameter/return type matching is not yet part of the OW grammar.
      */
     private void validateInterfaceImplementations() {
+        // Reject typos in signatures even if the method is never called.
+        for (Ast.InterfaceDecl iface : interfaces.values()) {
+            for (Ast.MethodSig method : iface.methods) {
+                for (String type : method.paramTypes) requireKnownType(type, iface.name + "." + method.name);
+                requireKnownType(method.returnType, iface.name + "." + method.name);
+            }
+        }
+        for (Ast.ClassDecl cls : classes.values()) {
+            for (Ast.MethodDecl method : cls.methods) {
+                for (String type : method.paramTypes) requireKnownType(type, cls.name + "." + method.name);
+                requireKnownType(method.returnType, cls.name + "." + method.name);
+            }
+        }
         Set<String> verified = new HashSet<>();
         for (Ast.ClassDecl cls : classes.values()) {
             checkInheritance(cls, new HashSet<>(), verified);
@@ -807,6 +829,10 @@ public class Interpreter {
             case "array", "list" -> {
                 if (!(value instanceof List<?>)) throw typeErr(typeName, value, what);
             }
+            case "float", "double" -> {
+                if (!(value instanceof Double) && !(value instanceof Integer))
+                    throw typeErr(typeName, value, what);
+            }
             default -> {
                 if (enums.containsKey(typeName)) {
                     if (!(value instanceof OwEnumValue ev) || !ev.enumName.equals(typeName))
@@ -815,7 +841,9 @@ public class Interpreter {
                     if (!(value instanceof OwObject obj) || !classMatchesType(obj.cls, typeName))
                         throw typeErr(typeName, value, what);
                 }
-                // unknown type name: no runtime check
+                else {
+                    throw new RuntimeException("Unknown type '" + typeName + "' in " + what);
+                }
             }
         }
     }

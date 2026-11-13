@@ -276,8 +276,8 @@ class MemoryStorage(Storage):
     return: true
 ```
 
-OW rejects mismatched parameter or return types before `main`, and checks
-actual arguments and results at method call boundaries. Annotations are
+OW rejects mismatched parameter or return types and unknown type names before
+`main`, and checks actual arguments and results at method call boundaries. Annotations are
 optional, so existing OW programs continue working.
 
 **Current limit:** This validates explicitly declared method signatures at

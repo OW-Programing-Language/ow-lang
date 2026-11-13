@@ -197,4 +197,37 @@ public class InterfaceContractTest {
                 """));
         assertTrue(error.getMessage().contains("return value of read expects string"));
     }
+
+    @Test public void unknownTypeInInterfaceRejectedBeforeMain() {
+        RuntimeException error = assertThrows(RuntimeException.class, () -> run("""
+                interface Store:
+                  fn read(key UnknwonKey) -> int
+                class S(Store):
+                  fn read(key UnknwonKey) -> int:
+                    return: 1
+                main:
+                  print: "unreachable"
+                """));
+        assertTrue(error.getMessage(), error.getMessage().contains("Unknown type 'UnknwonKey'"));
+    }
+
+    @Test public void unknownTypeInTypedVariableIsRejected() {
+        RuntimeException error = assertThrows(RuntimeException.class, () -> run("""
+                main:
+                  set v NotAType: 42
+                """));
+        assertTrue(error.getMessage().contains("Unknown type 'NotAType'"));
+    }
+
+    @Test public void floatAnnotationChecksNumericValues() {
+        String result = run("""
+                class Math:
+                  fn half(x float) -> float:
+                    return: x / 2.0
+                main:
+                  set m: new Math()
+                  print: m.half(8.0)
+                """);
+        assertTrue(result.contains("4"));
+    }
 }
