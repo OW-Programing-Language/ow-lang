@@ -283,8 +283,10 @@ public final class ModuleTypeChecker {
             }
             if (inputs.get(0) != null &&
                     !matches(signatures.get(inputs.get(0)), signatures.get(functor.inputSignature))) {
+                String expects = signatures.containsKey(functor.inputSignature)
+                        ? functor.inputSignature : "functor " + functor.inputSignature;
                 throw moduleError(call.line, "Functor " + call.name + " requires " +
-                        functor.inputSignature + ", got " + inputs.get(0));
+                        expects + ", got " + inputs.get(0));
             }
             return functor.outputSignature;
         }
