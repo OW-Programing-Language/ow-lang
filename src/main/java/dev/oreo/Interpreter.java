@@ -95,6 +95,19 @@ public class Interpreter {
         @Override public String toString() { return "<module " + name + " : " + signature + ">"; }
     }
 
+    /** Existential package: preserves the original module identity while sealing exports. */
+    public static final class OwPackedModule {
+        final OwModule original;
+        final String exposedSignature;
+        OwPackedModule(OwModule original, String exposedSignature) {
+            this.original = original;
+            this.exposedSignature = exposedSignature;
+        }
+        @Override public String toString() {
+            return "<packed module : " + exposedSignature + ">";
+        }
+    }
+
     public static final class OwFunctor {
         public final Ast.FunctorDecl declaration;
         public final Map<String, Object> captured;
@@ -1243,7 +1256,7 @@ public class Interpreter {
             "abs", "min", "max", "pow", "sqrt", "clamp",
             "floor", "round", "ceil",
             "sleep", "now_ms",
-            "assert"
+            "pack", "unpack", "assert"
     ));
 
     private static boolean isBuiltin(String name) { return BUILTINS.contains(name); }
@@ -1311,9 +1324,44 @@ public class Interpreter {
             case "round" -> { requireArgCount(call, 1); yield (int) Math.round(toDouble(evalExpr(call.args.get(0), env))); }
             case "sleep" -> builtinSleep(call, env);
             case "now_ms" -> { requireArgCount(call, 0); yield (int) (System.currentTimeMillis() - startMillis); }
+            case "pack" -> builtinPack(call, env);
+            case "unpack" -> builtinUnpack(call, env);
             case "assert" -> builtinAssert(call, env);
             default -> throw new RuntimeException("Unknown builtin: " + call.name);
         };
+    }
+
+    private Object builtinPack(Ast.CallExpr call, Map<String, Object> env) {
+        requireArgCount(call, 2);
+        Object source = evalExpr(call.args.get(0), env);
+        Object requested = evalExpr(call.args.get(1), env);
+        if (!(requested instanceof String target))
+            throw new RuntimeException("pack expects a module signature name string");
+        Ast.ModuleTypeDecl required = moduleTypes.get(target);
+        if (required == null) throw new RuntimeException("Unknown module type " + target);
+        if (!(source instanceof OwModule module) ||
+                !ModuleTypeChecker.matches(moduleTypes.get(module.signature), required)) {
+            throw new RuntimeException("pack requires module matching " + target);
+        }
+        return new OwPackedModule(module, target);
+    }
+
+    private Object builtinUnpack(Ast.CallExpr call, Map<String, Object> env) {
+        requireArgCount(call, 2);
+        Object source = evalExpr(call.args.get(0), env);
+        Object requested = evalExpr(call.args.get(1), env);
+        if (!(requested instanceof String target))
+            throw new RuntimeException("unpack expects a module signature name string");
+        Ast.ModuleTypeDecl required = moduleTypes.get(target);
+        if (required == null) throw new RuntimeException("Unknown module type " + target);
+        if (!(source instanceof OwPackedModule packed))
+            throw new RuntimeException("unpack expects a packed module value");
+        if (!ModuleTypeChecker.matches(moduleTypes.get(packed.exposedSignature), required))
+            throw new RuntimeException("unpack cannot widen a sealed module from " +
+                    packed.exposedSignature + " to " + target);
+        OwModule original = packed.original;
+        return new OwModule(original.name, target, new ArrayList<>(original.definitions.values()),
+                            original.captured, original.typeAliases, original.identity);
     }
 
     private Ast.Expr arg(Ast.CallExpr call, int i, int expected) {

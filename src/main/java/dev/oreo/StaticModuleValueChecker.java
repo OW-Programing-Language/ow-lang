@@ -13,11 +13,13 @@ public final class StaticModuleValueChecker {
     private final Map<String, Ast.ModuleTypeDecl> signatures;
     private final Map<String, Ast.FunctorDecl> functors = new HashMap<>();
     private final Map<String, ModuleRef> moduleValues = new HashMap<>();
+    private final Map<String, PackedRef> packedValues = new HashMap<>();
     private final Map<String, ValueType> valueTypes = new HashMap<>();
     private long freshCounter = 0;
 
     private record ModuleRef(String signature, String identity,
                              Map<String, String> aliases, Map<String, ModuleRef> captured) {}
+    private record PackedRef(ModuleRef original, String exposedSignature) {}
     private record ValueType(String primitive, String abstractIdentity) {
         static ValueType primitive(String name) { return new ValueType(name, null); }
         static ValueType opaque(String identity) { return new ValueType(null, identity); }
@@ -48,6 +50,14 @@ public final class StaticModuleValueChecker {
         if (body == null) return;
         for (Ast.Stmt stmt : body) {
             if (stmt instanceof Ast.SetStmt set) {
+                PackedRef packed = inferPacked(set.value);
+                if (packed != null) {
+                    packedValues.put(set.name, packed);
+                    moduleValues.remove(set.name);
+                    valueTypes.remove(set.name);
+                    continue;
+                }
+                packedValues.remove(set.name);
                 ModuleRef module = inferModule(set.value);
                 if (module != null) {
                     moduleValues.put(set.name, module);
@@ -108,10 +118,13 @@ public final class StaticModuleValueChecker {
     /** Branch-local bindings cannot leak into the parent, but are still checked. */
     private void branchOf(List<Ast.Stmt> body) {
         Map<String, ModuleRef> savedModules = new HashMap<>(moduleValues);
+        Map<String, PackedRef> savedPackages = new HashMap<>(packedValues);
         Map<String, ValueType> savedValues = new HashMap<>(valueTypes);
         analyze(body);
         moduleValues.clear();
         moduleValues.putAll(savedModules);
+        packedValues.clear();
+        packedValues.putAll(savedPackages);
         valueTypes.clear();
         valueTypes.putAll(savedValues);
     }
@@ -123,6 +136,19 @@ public final class StaticModuleValueChecker {
             return path == null ? null : moduleValues.get(path);
         }
         if (!(expr instanceof Ast.CallExpr call)) return null;
+        if ("unpack".equals(call.name)) {
+            if (call.args.size() != 2) throw error(call.span, "unpack expects 2 arguments");
+            PackedRef packed = inferPacked(call.args.get(0));
+            String requested = literalSignature(call, 1);
+            if (packed == null) return null; // dynamic storage is checked by interpreter
+            if (!ModuleTypeChecker.matches(signatures.get(packed.exposedSignature),
+                                            signatures.get(requested))) {
+                throw error(call.span, "unpack cannot widen sealed module from " +
+                        packed.exposedSignature + " to " + requested);
+            }
+            ModuleRef original = packed.original;
+            return new ModuleRef(requested, original.identity, original.aliases, original.captured);
+        }
         Ast.FunctorDecl functor = functors.get(call.name);
         if (functor == null || call.args.size() != 1 || functor.returnedFunctor != null) {
             return null;
@@ -134,6 +160,32 @@ public final class StaticModuleValueChecker {
                 : functor.name + "(" + argument.identity + ")";
         return new ModuleRef(functor.outputSignature, identity, functor.typeAliases,
                 Map.of(functor.argument, argument));
+    }
+
+    private String literalSignature(Ast.CallExpr call, int index) {
+        if (call.args.size() <= index ||
+                !(call.args.get(index) instanceof Ast.StringLit requested)) {
+            throw error(call.span, call.name + " requires a literal module signature name");
+        }
+        if (!signatures.containsKey(requested.value)) {
+            throw error(call.span, "Unknown module signature " + requested.value);
+        }
+        return requested.value;
+    }
+
+    private PackedRef inferPacked(Ast.Expr expr) {
+        if (expr instanceof Ast.Var variable) return packedValues.get(variable.name);
+        if (!(expr instanceof Ast.CallExpr call) || !"pack".equals(call.name)) return null;
+        if (call.args.size() != 2) throw error(call.span, "pack expects 2 arguments");
+        String requested = literalSignature(call, 1);
+        ModuleRef original = inferModule(call.args.get(0));
+        if (original == null) return null; // dynamic source rejected by runtime
+        if (!ModuleTypeChecker.matches(signatures.get(original.signature),
+                                       signatures.get(requested))) {
+            throw error(call.span, "pack cannot ascribe " + original.signature +
+                    " as " + requested);
+        }
+        return new PackedRef(original, requested);
     }
 
     private static String modulePath(Ast.Expr expr) {
@@ -213,6 +265,14 @@ public final class StaticModuleValueChecker {
             return null;
         }
         if (expr instanceof Ast.CallExpr call) {
+            if ("pack".equals(call.name)) {
+                inferPacked(call);
+                return null;
+            }
+            if ("unpack".equals(call.name)) {
+                inferModule(call);
+                return null;
+            }
             for (Ast.Expr arg : call.args) inferValue(arg);
             return null;
         }

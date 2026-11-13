@@ -256,3 +256,24 @@ A qualified definition creates a namespace object at runtime, allowing direct
 `Shop.Inventory.get()` calls. Alias paths retain the same original identity.
 This is **qualified module declarations**, not full OCaml nested lexical
 module structures (with recursive submodules, local sealing and nested functors).
+
+## First-class module packages
+
+`pack(module, "SIGNATURE")` creates an existential-style, sealed
+module package, which can be stored in arrays and records or passed as
+a dynamic value. `unpack(package, "SIGNATURE")` recovers a typed module
+view, preserving the original opaque identity and disallowing widening
+to exports hidden by the package's signature.
+
+```ow
+set packed: pack(Store, "READ")
+set items: [packed]
+set view READ: unpack(items[0], "READ")
+print: view.get()
+```
+
+Known pack/unpack operations with literal signatures are validated by
+`ow check`; dynamically retrieved packages are checked during evaluation.
+Unlike full OCaml `(module M : S)` existential semantics, module packages
+are not yet accompanied by universal static type inference across
+heterogeneous containers or LLVM native lowering.
