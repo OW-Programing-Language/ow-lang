@@ -30,7 +30,10 @@ main:
 
 The compiler front end recognizes `module_type`, `module`, and `functor`
 declarations as AST nodes. A semantic checker validates both module and functor
-exports before running the entry `main` block. Module types match
+exports before running the entry `main` block. It also analyzes calls through
+statically known module values and functor parameters: a mismatched application,
+unknown public method, or incorrect arity causes a module type error with the
+source line before any `main` statement executes. Module types match
 *structurally*: a module exposing more members can satisfy a narrower functor
 parameter, provided each required method has the same parameter and return
 types. Functor applications accept module values only, not arbitrary objects.

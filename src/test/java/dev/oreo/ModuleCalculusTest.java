@@ -153,4 +153,71 @@ public class ModuleCalculusTest {
                 """));
         assertTrue(e.getMessage().contains("Duplicate global declaration Twice"));
     }
+
+    @Test public void wrongModuleArgumentIsRejectedBeforeFirstStatement() {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        Interpreter interpreter = new Interpreter(new PrintStream(bytes));
+        Ast.Program program = new Parser(new Lexer("""
+                module_type INPUT:
+                  fn read() -> int
+                module_type OUTPUT:
+                  fn get() -> int
+                module Wrong: OUTPUT
+                  fn get() -> int:
+                    return: 5
+                functor Make(X: INPUT) -> OUTPUT:
+                  fn get() -> int:
+                    return: X.read()
+                main:
+                  print: "this must not print"
+                  set bad: Make(Wrong)
+                """).lexAll()).parseProgram();
+        RuntimeException error = assertThrows(RuntimeException.class, () -> interpreter.run(program));
+        assertTrue(error.getMessage(), error.getMessage().contains("Module type error at line"));
+        assertTrue(error.getMessage().contains("requires INPUT, got OUTPUT"));
+        assertEquals("", bytes.toString().trim());
+    }
+
+    @Test public void functorBodyUnknownExportIsRejectedBeforeMain() {
+        RuntimeException error = assertThrows(RuntimeException.class, () -> run("""
+                module_type INPUT:
+                  fn read() -> int
+                module_type OUTPUT:
+                  fn get() -> int
+                functor Make(X: INPUT) -> OUTPUT:
+                  fn get() -> int:
+                    return: X.missing()
+                main:
+                  print: "should not run"
+                """));
+        assertTrue(error.getMessage(), error.getMessage().contains("does not export missing"));
+    }
+
+    @Test public void wrongModuleCallArityHasSourceLine() {
+        RuntimeException error = assertThrows(RuntimeException.class, () -> run("""
+                module_type API:
+                  fn add(a int, b int) -> int
+                module Math: API
+                  fn add(a int, b int) -> int:
+                    return: a + b
+                main:
+                  print: Math.add(1)
+                """));
+        assertTrue(error.getMessage(), error.getMessage().contains("line 7"));
+        assertTrue(error.getMessage().contains("expects 2 args, got 1"));
+    }
+
+    @Test public void knownModuleAliasIsCheckedBeforeMain() {
+        RuntimeException error = assertThrows(RuntimeException.class, () -> run("""
+                module_type API:
+                  fn read() -> int
+                module Foo: API
+                  fn read() -> int:
+                    return: 3
+                main:
+                  set alias API: Foo
+                  print: alias.hidden()
+                """));
+        assertTrue(error.getMessage(), error.getMessage().contains("does not export hidden"));
+    }
 }
