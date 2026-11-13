@@ -666,9 +666,9 @@ public class Interpreter {
             String paramType = method.paramTypes.get(i);
             Object value = args.get(i);
             if (paramType != null && module.typeAliases.containsKey(paramType)) {
-                String exposed = publicRepresentation(module, paramType);
-                if (exposed != null) {
-                    checkType(exposed, value, "manifest type " + module.name + "." + paramType);
+                String representationType = publicRepresentation(module, paramType);
+                if (representationType != null) {
+                    checkType(representationType, value, "manifest type " + module.name + "." + paramType);
                 } else {
                     String expectedIdentity = abstractIdentity(module, paramType);
                     if (!(value instanceof OwOpaque opaque) ||
@@ -697,9 +697,9 @@ public class Interpreter {
             result = signal.value;
         }
         if (method.returnType != null && module.typeAliases.containsKey(method.returnType)) {
-            String exposed = publicRepresentation(module, method.returnType);
-            if (exposed != null) {
-                checkType(exposed, result, "manifest return type " +
+            String representationType = publicRepresentation(module, method.returnType);
+            if (representationType != null) {
+                checkType(representationType, result, "manifest return type " +
                         signature.name + "." + method.returnType);
                 return result;
             }

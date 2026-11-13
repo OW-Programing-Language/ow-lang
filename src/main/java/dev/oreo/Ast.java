@@ -115,11 +115,6 @@ public class Ast {
         public FunctorDecl(String name, String argument, String inputSignature,
                            String outputSignature, List<MethodDecl> methods,
                            Map<String, String> typeAliases, boolean generative) {
-            this.name = name;
-            this.argument = argument;
-            this.inputSignature = inputSignature;
-            this.outputSignature = outputSignature;
-            this.methods = methods;
             this(name, argument, inputSignature, outputSignature, methods,
                  typeAliases, generative, Map.of());
         }
