@@ -145,6 +145,7 @@ public class Interpreter {
 
     private UiHost ui; // lazily created (web or native)
     private WebRuntime web; // lazily created
+    private final List<RuntimeExtension> extensions = loadRuntimeExtensions();
     private final ThreadLocal<OwRecord> currentRequest = new ThreadLocal<>();
     private final java.util.Random random = new java.util.Random();
 
@@ -158,6 +159,36 @@ public class Interpreter {
     }
 
     public PrintStream out() { return out; }
+
+    public List<RuntimeExtension> runtimeExtensions() { return extensions; }
+
+    private static List<RuntimeExtension> loadRuntimeExtensions() {
+        List<RuntimeExtension> result = new ArrayList<>();
+        for (RuntimeExtension extension : ServiceLoader.load(RuntimeExtension.class))
+            result.add(extension);
+        return List.copyOf(result);
+    }
+
+    private Object invokeExtension(Ast.CallExpr call, Map<String, Object> env) {
+        if (call.args.isEmpty()) throw new RuntimeException("extension expects an operation name");
+        Object operation = evalExpr(call.args.get(0), env);
+        if (!(operation instanceof String name) || name.isBlank())
+            throw new RuntimeException("extension operation must be a nonempty string");
+        List<Object> arguments = new ArrayList<>();
+        for (int i = 1; i < call.args.size(); i++)
+            arguments.add(evalExpr(call.args.get(i), env));
+        RuntimeExtension matched = null;
+        for (RuntimeExtension extension : extensions) {
+            if (extension.supports(name)) {
+                if (matched != null)
+                    throw new RuntimeException("Ambiguous runtime extension operation " + name);
+                matched = extension;
+            }
+        }
+        if (matched == null)
+            throw new RuntimeException("No installed OW extension supports " + name);
+        return matched.invoke(name, List.copyOf(arguments));
+    }
 
     private static InputProvider consoleInput(PrintStream out) {
         BufferedReader in = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
@@ -270,6 +301,12 @@ public class Interpreter {
             execBlock(program.mainBody, globals);
         } finally {
             if (ui != null) ui.shutdown();
+            for (RuntimeExtension extension : extensions) {
+                try { extension.close(); }
+                catch (Exception ex) {
+                    out.println("OW extension cleanup failed: " + ex.getClass().getSimpleName());
+                }
+            }
         }
     }
 
@@ -1284,7 +1321,7 @@ public class Interpreter {
             "abs", "min", "max", "pow", "sqrt", "clamp",
             "floor", "round", "ceil",
             "sleep", "now_ms",
-            "pack", "unpack", "assert"
+            "pack", "unpack", "assert", "extension"
     ));
 
     private static boolean isBuiltin(String name) { return BUILTINS.contains(name); }
@@ -1355,6 +1392,7 @@ public class Interpreter {
             case "pack" -> builtinPack(call, env);
             case "unpack" -> builtinUnpack(call, env);
             case "assert" -> builtinAssert(call, env);
+            case "extension" -> invokeExtension(call, env);
             default -> throw new RuntimeException("Unknown builtin: " + call.name);
         };
     }
