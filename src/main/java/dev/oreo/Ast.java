@@ -150,11 +150,6 @@ public class Ast {
                            String outputSignature, List<MethodDecl> methods,
                            Map<String, String> typeAliases, boolean generative,
                            Map<String, String> typeSharing) {
-            this.name = name;
-            this.argument = argument;
-            this.inputSignature = inputSignature;
-            this.outputSignature = outputSignature;
-            this.methods = methods;
             this(name, argument, inputSignature, outputSignature,
                  methods, typeAliases, generative, typeSharing, null);
         }
