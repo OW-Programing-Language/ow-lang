@@ -111,7 +111,6 @@ public class Parser {
         expect(Type.NEWLINE);
         expect(Type.INDENT);
         List<Ast.MethodSig> methods = new ArrayList<>();
-        List<String> includes = new ArrayList<>();
         while (!check(Type.DEDENT) && !check(Type.EOF)) {
             if (check(Type.NEWLINE)) { p++; continue; }
             if (!matchIdent("fn")) throw err("interface body expects 'fn' signatures");
@@ -134,6 +133,7 @@ public class Parser {
         List<String> abstractTypes = new ArrayList<>();
         Map<String, String> manifestTypes = new LinkedHashMap<>();
         List<Ast.MethodSig> methods = new ArrayList<>();
+        List<String> includes = new ArrayList<>();
         while (!check(Type.DEDENT) && !check(Type.EOF)) {
             if (check(Type.NEWLINE)) { p++; continue; }
             if (matchIdent("include")) {
