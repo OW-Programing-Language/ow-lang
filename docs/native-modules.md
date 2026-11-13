@@ -397,3 +397,13 @@ python3 tools/ocaml_conformance.py
 
 This is a **representative behavior-comparison suite**, not exhaustive
 conformance to every OCaml module calculus rule or its entire standard library.
+
+## Branch-aware static module value checking
+
+The `ow check` preflight follows literal `if true`/`if false` branches,
+and merges the abstract identities of variables after dynamic conditional
+branches, loops, exception handlers and switches. A type/identity is kept
+only when it is **identical on all possible paths**. Conflicting paths lose
+static certainty, so later calls retain runtime checks rather than being
+incorrectly validated against a stale type identity. This improves soundness
+but is still conservative analysis, **not complete OCaml module type inference**.

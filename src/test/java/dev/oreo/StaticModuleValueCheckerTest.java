@@ -33,6 +33,68 @@ public class StaticModuleValueCheckerTest {
                 return: x
             """;
 
+    private void checkOnly(String source) {
+        Ast.Program program = new Parser(new Lexer(source, "branches.ow").lexAll()).parseProgram();
+        ModuleTypeChecker.check(program);
+    }
+
+    @Test public void literalTrueRebindingIsCheckedBeforeExecution() {
+        RuntimeException error = assertThrows(RuntimeException.class, () -> checkOnly(BOXES + """
+                main:
+                  set item: First.wrap(1)
+                  if: true
+                    set item: Second.wrap(2)
+                  print: First.unwrap(item)
+                """));
+        assertTrue(error.getMessage(), error.getMessage().contains("abstract type mismatch"));
+    }
+
+    @Test public void unreachableLiteralFalseBranchIsNotFalselyRejected() {
+        checkOnly(BOXES + """
+                main:
+                  set item: First.wrap(1)
+                  if: false
+                    set item: Second.wrap(2)
+                  print: First.unwrap(item)
+                """);
+    }
+
+    @Test public void bothBranchesSharingTypeIdentityStayKnown() {
+        checkOnly(BOXES + """
+                main:
+                  set item: First.wrap(1)
+                  set choose: 1
+                  if: choose == 1
+                    set item: First.wrap(2)
+                  else:
+                    set item: First.wrap(3)
+                  print: First.unwrap(item)
+                """);
+    }
+
+    @Test public void uncertainBranchDoesNotKeepStaleAbstractIdentity() {
+        // This is a conservative analysis: a conflicting branch drops
+        // the old static identity; runtime still validates concrete calls.
+        checkOnly(BOXES + """
+                main:
+                  set item: First.wrap(1)
+                  set choose: 1
+                  if: choose == 1
+                    set item: Second.wrap(2)
+                  print: First.unwrap(item)
+                """);
+    }
+
+    @Test public void unreachableLoopDoesNotChangeKnownAbstractIdentity() {
+        checkOnly(BOXES + """
+                main:
+                  set item: First.wrap(1)
+                  while: false
+                    set item: Second.wrap(2)
+                  print: First.unwrap(item)
+                """);
+    }
+
     @Test public void unrelatedAbstractTypesFailBeforeFirstPrint() {
         RuntimeException error = assertThrows(RuntimeException.class, () -> run(BOXES + """
                 main:

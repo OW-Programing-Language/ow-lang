@@ -82,21 +82,30 @@ public final class StaticModuleValueChecker {
                 inferValue(ret.value);
             } else if (stmt instanceof Ast.IfStmt branch) {
                 inferValue(branch.condition);
-                branchOf(branch.thenBody);
-                branchOf(branch.elseBody);
+                if (branch.condition instanceof Ast.BoolLit literal) {
+                    // A literal branch is definitely taken (or unreachable).
+                    analyze(literal.value ? branch.thenBody : branch.elseBody);
+                } else {
+                    joinBranches(Arrays.asList(branch.thenBody, branch.elseBody));
+                }
             } else if (stmt instanceof Ast.WhileStmt loop) {
                 inferValue(loop.condition);
-                branchOf(loop.body);
+                if (!(loop.condition instanceof Ast.BoolLit literal && !literal.value)) {
+                    // A loop may run zero or more times: its assignments are
+                    // only trusted if identical to the incoming environment.
+                    joinBranches(Arrays.asList(null, loop.body));
+                }
             } else if (stmt instanceof Ast.TryStmt tr) {
-                branchOf(tr.tryBody);
-                branchOf(tr.catchBody);
+                joinBranches(Arrays.asList(tr.tryBody, tr.catchBody));
             } else if (stmt instanceof Ast.SwitchStmt sw) {
                 inferValue(sw.subject);
+                List<List<Ast.Stmt>> alternatives = new ArrayList<>();
                 for (Ast.CaseClause clause : sw.cases) {
                     for (Ast.Expr expr : clause.values) inferValue(expr);
-                    branchOf(clause.body);
+                    alternatives.add(clause.body);
                 }
-                branchOf(sw.defaultBody);
+                alternatives.add(sw.defaultBody);
+                joinBranches(alternatives);
             } else if (stmt instanceof Ast.SetFieldStmt set) {
                 inferValue(set.target);
                 inferValue(set.value);
@@ -115,6 +124,51 @@ public final class StaticModuleValueChecker {
                 branchOf(route.body);
             }
         }
+    }
+
+    private record FlowState(Map<String, ModuleRef> modules,
+                             Map<String, PackedRef> packages,
+                             Map<String, ValueType> values) {}
+
+    private FlowState snapshot() {
+        return new FlowState(new HashMap<>(moduleValues),
+                             new HashMap<>(packedValues),
+                             new HashMap<>(valueTypes));
+    }
+
+    private void restore(FlowState state) {
+        moduleValues.clear();
+        moduleValues.putAll(state.modules);
+        packedValues.clear();
+        packedValues.putAll(state.packages);
+        valueTypes.clear();
+        valueTypes.putAll(state.values);
+    }
+
+    /** Keep only values proved identical on every possible control-flow path. */
+    private static <T> Map<String, T> commonValues(List<Map<String, T>> alternatives) {
+        Map<String, T> retained = new HashMap<>(alternatives.get(0));
+        for (int i = 1; i < alternatives.size(); i++) {
+            Map<String, T> next = alternatives.get(i);
+            retained.entrySet().removeIf(entry ->
+                    !next.containsKey(entry.getKey()) ||
+                    !Objects.equals(entry.getValue(), next.get(entry.getKey())));
+        }
+        return retained;
+    }
+
+    private void joinBranches(List<List<Ast.Stmt>> alternatives) {
+        FlowState initial = snapshot();
+        List<FlowState> outcomes = new ArrayList<>();
+        for (List<Ast.Stmt> body : alternatives) {
+            restore(initial);
+            analyze(body);
+            outcomes.add(snapshot());
+        }
+        restore(new FlowState(
+                commonValues(outcomes.stream().map(FlowState::modules).toList()),
+                commonValues(outcomes.stream().map(FlowState::packages).toList()),
+                commonValues(outcomes.stream().map(FlowState::values).toList())));
     }
 
     /** Branch-local bindings cannot leak into the parent, but are still checked. */
