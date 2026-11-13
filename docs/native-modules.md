@@ -407,3 +407,15 @@ only when it is **identical on all possible paths**. Conflicting paths lose
 static certainty, so later calls retain runtime checks rather than being
 incorrectly validated against a stale type identity. This improves soundness
 but is still conservative analysis, **not complete OCaml module type inference**.
+
+
+## Static higher-order returned functor values
+
+OW preflight now tracks known `functor_type` values returned from a
+higher-order functor. A returned functor can be stored in a variable or
+reassigned, then checked when applied to a named module. Calls using the wrong
+module signature fail during `ow check`, not only at interpreter runtime.
+Changed functor bindings are removed from the known static environment;
+branch merges preserve a returned functor only when all possible paths agree.
+Full generalized higher-kinded inference and dynamic functor packages are
+still outstanding.
