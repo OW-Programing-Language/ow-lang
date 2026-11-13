@@ -140,6 +140,16 @@ public final class ModuleTypeChecker {
                 }
             }
         }
+        // Qualified definitions create namespaces, not nested fields on an
+        // existing ordinary module/class/functor.
+        for (Ast.ModuleDecl module : program.modules) {
+            if (!module.name.contains(".")) continue;
+            String root = module.name.substring(0, module.name.indexOf('.'));
+            if (roots.contains(root)) {
+                throw new RuntimeException("Module namespace " + root +
+                        " conflicts with a module declaration");
+            }
+        }
         Map<String, String> resolved = new LinkedHashMap<>();
         for (String alias : aliases.keySet()) {
             resolveAlias(alias, modules, aliases, resolved, new LinkedHashSet<>());

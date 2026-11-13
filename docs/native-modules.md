@@ -235,3 +235,24 @@ collisions. See [module_aliases.ow](../examples/module_calculus/module_aliases.o
 **Limit:** these are *nested alias paths*, not full OCaml nested module
 implementations, module functors as submodules, or arbitrary first-class module
 packing/unpacking. Those require further syntax/type-system work.
+
+## Qualified native module definitions
+
+You can now define real native modules under dotted namespace paths instead
+of only aliasing an existing top-level module:
+
+```ow
+module_type Shop.API:
+  fn get() -> int
+module Shop.Inventory: Shop.API
+  fn get() -> int:
+    return: 15
+module Inventory = Shop.Inventory
+```
+
+The type checker recognizes `Shop.API` in functor inputs/outputs and signature
+`include`, and tracks the distinct abstract identities of qualified modules.
+A qualified definition creates a namespace object at runtime, allowing direct
+`Shop.Inventory.get()` calls. Alias paths retain the same original identity.
+This is **qualified module declarations**, not full OCaml nested lexical
+module structures (with recursive submodules, local sealing and nested functors).

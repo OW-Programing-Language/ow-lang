@@ -51,6 +51,10 @@ jobs:
         run: java -jar target/OwIDE.jar run examples/module_calculus/named_type_sharing.ow
       - name: OCaml OrderedType / Set.Make-style comparison fixture
         run: java -jar target/OwIDE.jar run examples/module_calculus/set_make.ow
+      - name: Validate qualified module definitions and signatures
+        run: |
+          java -jar target/OwIDE.jar check examples/module_calculus/qualified_modules.ow
+          java -jar target/OwIDE.jar run examples/module_calculus/qualified_modules.ow
       - name: Reject malformed modules, functor arguments, and hidden exports
         run: |
           for file in tests/module_calculus_*.ow tests/module_abstract_*.ow tests/module_functor_generative_mismatch.ow tests/module_manifest_mismatch.ow tests/module_dependent_*.ow tests/module_higher_order_*.ow tests/module_named_type_*.ow tests/module_set_make_*.ow; do
