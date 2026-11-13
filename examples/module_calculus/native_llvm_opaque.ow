@@ -1,0 +1,25 @@
+# Typed opaque tokens are erased to i32 only after compile-time checks.
+# The functor's result type shares the exact abstract identity of Warehouse.sku.
+module_type STOCK:
+  type sku
+  fn issue(value int) -> sku
+  fn price(value sku) -> int
+
+module Warehouse: STOCK
+  type sku: int
+  fn issue(value int) -> sku:
+    return: value + 3
+  fn price(value sku) -> int:
+    return: value * 2
+
+functor Forward(Source: STOCK) -> STOCK with_type sku = Source.sku:
+  type sku: Source.sku
+  fn issue(value int) -> sku:
+    return: Source.issue(value)
+  fn price(value sku) -> int:
+    return: Source.price(value)
+
+main:
+  set stocked STOCK: Forward(Warehouse)
+  set ticket: stocked.issue(10)
+  print: stocked.price(ticket)
