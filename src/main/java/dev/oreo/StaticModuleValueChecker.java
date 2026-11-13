@@ -12,6 +12,8 @@ import java.util.*;
 public final class StaticModuleValueChecker {
     private final Map<String, Ast.ModuleTypeDecl> signatures;
     private final Map<String, Ast.FunctorDecl> functors = new HashMap<>();
+    private final Map<String, Ast.FunctorDecl> functorValues = new HashMap<>();
+    private final Map<String, Ast.FunctorTypeDecl> functorTypes = new HashMap<>();
     private final Map<String, ModuleRef> moduleValues = new HashMap<>();
     private final Map<String, Ast.ModuleDecl> lexicalOwners = new HashMap<>();
     private final Map<String, PackedRef> packedValues = new HashMap<>();
@@ -42,8 +44,10 @@ public final class StaticModuleValueChecker {
             ModuleRef original = checker.moduleValues.get(alias.getValue());
             if (original != null) checker.moduleValues.put(alias.getKey(), original);
         }
+        checker.functorTypes.putAll(ModuleTypeChecker.functorSignatures(program));
         for (Ast.FunctorDecl functor : program.functors) {
             checker.functors.put(functor.name, functor);
+            checker.functorValues.put(functor.name, functor);
         }
         checker.analyze(program.mainBody);
     }
@@ -57,9 +61,24 @@ public final class StaticModuleValueChecker {
                     packedValues.put(set.name, packed);
                     moduleValues.remove(set.name);
                     valueTypes.remove(set.name);
+                    functorValues.remove(set.name);
                     continue;
                 }
                 packedValues.remove(set.name);
+                Ast.FunctorDecl returnedFunctor = inferFunctor(set.value);
+                if (returnedFunctor != null) {
+                    if (set.typeName != null && functorTypes.containsKey(set.typeName) &&
+                        !ModuleTypeChecker.matchesFunctor(returnedFunctor,
+                                functorTypes.get(set.typeName), signatures)) {
+                        throw error(set.span, "functor value " + returnedFunctor.name +
+                                " does not satisfy " + set.typeName);
+                    }
+                    functorValues.put(set.name, returnedFunctor);
+                    moduleValues.remove(set.name);
+                    valueTypes.remove(set.name);
+                    continue;
+                }
+                functorValues.remove(set.name);
                 ModuleRef module = inferModule(set.value);
                 if (module != null) {
                     moduleValues.put(set.name, module);
@@ -128,12 +147,14 @@ public final class StaticModuleValueChecker {
 
     private record FlowState(Map<String, ModuleRef> modules,
                              Map<String, PackedRef> packages,
-                             Map<String, ValueType> values) {}
+                             Map<String, ValueType> values,
+                             Map<String, Ast.FunctorDecl> functorValues) {}
 
     private FlowState snapshot() {
         return new FlowState(new HashMap<>(moduleValues),
                              new HashMap<>(packedValues),
-                             new HashMap<>(valueTypes));
+                             new HashMap<>(valueTypes),
+                             new HashMap<>(functorValues));
     }
 
     private void restore(FlowState state) {
@@ -143,6 +164,8 @@ public final class StaticModuleValueChecker {
         packedValues.putAll(state.packages);
         valueTypes.clear();
         valueTypes.putAll(state.values);
+        functorValues.clear();
+        functorValues.putAll(state.functorValues);
     }
 
     /** Keep only values proved identical on every possible control-flow path. */
@@ -168,7 +191,8 @@ public final class StaticModuleValueChecker {
         restore(new FlowState(
                 commonValues(outcomes.stream().map(FlowState::modules).toList()),
                 commonValues(outcomes.stream().map(FlowState::packages).toList()),
-                commonValues(outcomes.stream().map(FlowState::values).toList())));
+                commonValues(outcomes.stream().map(FlowState::values).toList()),
+                commonValues(outcomes.stream().map(FlowState::functorValues).toList())));
     }
 
     /** Branch-local bindings cannot leak into the parent, but are still checked. */
@@ -176,6 +200,7 @@ public final class StaticModuleValueChecker {
         Map<String, ModuleRef> savedModules = new HashMap<>(moduleValues);
         Map<String, PackedRef> savedPackages = new HashMap<>(packedValues);
         Map<String, ValueType> savedValues = new HashMap<>(valueTypes);
+        Map<String, Ast.FunctorDecl> savedFunctors = new HashMap<>(functorValues);
         analyze(body);
         moduleValues.clear();
         moduleValues.putAll(savedModules);
@@ -183,6 +208,8 @@ public final class StaticModuleValueChecker {
         packedValues.putAll(savedPackages);
         valueTypes.clear();
         valueTypes.putAll(savedValues);
+        functorValues.clear();
+        functorValues.putAll(savedFunctors);
     }
 
     private ModuleRef inferModule(Ast.Expr expr) {
@@ -206,17 +233,45 @@ public final class StaticModuleValueChecker {
             ModuleRef original = packed.original;
             return new ModuleRef(requested, original.identity, original.aliases, original.captured);
         }
-        Ast.FunctorDecl functor = functors.get(call.name);
+        Ast.FunctorDecl functor = functorValues.get(call.name);
         if (functor == null || call.args.size() != 1 || functor.returnedFunctor != null) {
             return null;
         }
         ModuleRef argument = inferModule(call.args.get(0));
         if (argument == null || !signatures.containsKey(functor.inputSignature)) return null;
+        if (!ModuleTypeChecker.matches(signatures.get(argument.signature),
+                                        signatures.get(functor.inputSignature))) {
+            throw error(call.span, "Functor " + functor.name + " requires " +
+                    functor.inputSignature + ", got " + argument.signature);
+        }
         String identity = functor.generative
                 ? functor.name + "#static" + (++freshCounter)
                 : functor.name + "(" + argument.identity + ")";
         return new ModuleRef(functor.outputSignature, identity, functor.typeAliases,
                 Map.of(functor.argument, argument));
+    }
+
+    /** Resolve statically known higher-order functor results without execution. */
+    private Ast.FunctorDecl inferFunctor(Ast.Expr expr) {
+        if (expr instanceof Ast.Var var) return functorValues.get(var.name);
+        if (!(expr instanceof Ast.CallExpr call)) return null;
+        Ast.FunctorDecl maker = functorValues.get(call.name);
+        if (maker == null || maker.returnedFunctor == null) return null;
+        if (call.args.size() != 1)
+            throw error(call.span, "Functor " + maker.name + " expects one argument");
+        if (maker.returnedFunctor.equals(maker.argument)) {
+            Ast.FunctorDecl supplied = inferFunctor(call.args.get(0));
+            if (supplied == null) return null;
+            Ast.FunctorTypeDecl required = functorTypes.get(maker.inputSignature);
+            if (required != null &&
+                !ModuleTypeChecker.matchesFunctor(supplied, required, signatures)) {
+                throw error(call.span, "Functor " + maker.name +
+                        " requires functor " + maker.inputSignature +
+                        ", got " + supplied.name);
+            }
+            return supplied;
+        }
+        return functors.get(maker.returnedFunctor);
     }
 
     private String literalSignature(Ast.CallExpr call, int index) {
