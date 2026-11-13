@@ -81,8 +81,8 @@ public class NativeModuleLlvmLowererTest {
         assertTrue(ex.getMessage().contains("first-class module package values"));
     }
 
-    @Test public void opaqueModuleRequiresALoweringStrategy() {
-        UnsupportedOperationException ex = assertThrows(UnsupportedOperationException.class, () -> ir("""
+    @Test public void opaqueIntegerModuleCanBeLowered() {
+        String llvm = ir("""
                 module_type API:
                   type token
                   fn make(v int) -> token
@@ -92,8 +92,8 @@ public class NativeModuleLlvmLowererTest {
                     return: v
                 main:
                   set x: M.make(3)
-                """));
-        assertTrue(ex.getMessage().contains("abstract type lowering"));
+                """);
+        assertTrue(llvm.contains("define i32 @__ow_module_"));
     }
 
     @Test public void opaqueIntegerTypeIsErasedOnlyAfterStaticValidation() {
