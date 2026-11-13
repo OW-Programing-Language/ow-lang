@@ -18,6 +18,7 @@ public class Parser {
         List<Ast.ModelDecl> models = new ArrayList<>();
         List<Ast.ModuleTypeDecl> moduleTypes = new ArrayList<>();
         List<Ast.ModuleDecl> modules = new ArrayList<>();
+        List<Ast.ModuleAliasDecl> moduleAliases = new ArrayList<>();
         List<Ast.FunctorDecl> functors = new ArrayList<>();
         List<Ast.FunctorTypeDecl> functorTypes = new ArrayList<>();
         List<String> imports = new ArrayList<>();
@@ -41,7 +42,13 @@ public class Parser {
             } else if (matchIdent("module_type")) {
                 moduleTypes.add(parseModuleType());
             } else if (matchIdent("module")) {
-                modules.add(parseModule());
+                int saved = p;
+                expect(Type.IDENT);
+                while (match(Type.DOT)) expect(Type.IDENT);
+                boolean alias = check(Type.ASSIGN);
+                p = saved;
+                if (alias) moduleAliases.add(parseModuleAlias());
+                else modules.add(parseModule());
             } else if (matchIdent("functor_type")) {
                 functorTypes.add(parseFunctorType());
             } else if (matchIdent("functor")) {
@@ -63,7 +70,8 @@ public class Parser {
         // 'main' is required for the entry file; imported files may omit it.
         // That check is enforced at run time (Interpreter.run).
         return new Ast.Program(imports, fns, enums, interfaces, classes, models,
-                               moduleTypes, modules, functors, functorTypes, mainBody);
+                               moduleTypes, modules, functors, functorTypes,
+                               moduleAliases, mainBody);
     }
 
     private Ast.FnDecl parseFnDecl() {
@@ -160,6 +168,18 @@ public class Parser {
         expect(Type.DEDENT);
         return new Ast.ModuleTypeDecl(name, methods, abstractTypes, manifestTypes,
                                       includes, Ast.SourceSpan.from(nameToken));
+    }
+
+    // module Alias = Warehouse or module Shop.Inventory = Warehouse
+    private Ast.ModuleAliasDecl parseModuleAlias() {
+        Lexer.Token first = expect(Type.IDENT);
+        String name = first.text;
+        while (match(Type.DOT)) name += "." + expect(Type.IDENT).text;
+        expect(Type.ASSIGN);
+        String target = expect(Type.IDENT).text;
+        while (match(Type.DOT)) target += "." + expect(Type.IDENT).text;
+        expect(Type.NEWLINE);
+        return new Ast.ModuleAliasDecl(name, target, Ast.SourceSpan.from(first));
     }
 
     // module Name: SIGNATURE

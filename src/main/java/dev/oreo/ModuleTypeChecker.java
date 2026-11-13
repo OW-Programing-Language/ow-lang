@@ -118,6 +118,51 @@ public final class ModuleTypeChecker {
         return result;
     }
 
+    /** Module aliases are transparent paths to the exact original module value. */
+    public static Map<String, String> resolvedAliases(Ast.Program program) {
+        Map<String, Ast.ModuleDecl> modules = new LinkedHashMap<>();
+        for (Ast.ModuleDecl module : program.modules) modules.put(module.name, module);
+        Map<String, Ast.ModuleAliasDecl> aliases = new LinkedHashMap<>();
+        Set<String> roots = new HashSet<>(modules.keySet());
+        for (Ast.ModuleAliasDecl alias : program.moduleAliases) {
+            if (aliases.putIfAbsent(alias.name, alias) != null || modules.containsKey(alias.name)) {
+                throw new RuntimeException("Duplicate module alias " + alias.name +
+                        " at " + alias.span.location());
+            }
+            if (!alias.name.contains(".")) roots.add(alias.name);
+        }
+        for (Ast.ModuleAliasDecl alias : program.moduleAliases) {
+            if (alias.name.contains(".")) {
+                String root = alias.name.substring(0, alias.name.indexOf('.'));
+                if (roots.contains(root)) {
+                    throw new RuntimeException("Module namespace " + root +
+                            " conflicts with a module declaration");
+                }
+            }
+        }
+        Map<String, String> resolved = new LinkedHashMap<>();
+        for (String alias : aliases.keySet()) {
+            resolveAlias(alias, modules, aliases, resolved, new LinkedHashSet<>());
+        }
+        return resolved;
+    }
+
+    private static String resolveAlias(String name, Map<String, Ast.ModuleDecl> modules,
+                                      Map<String, Ast.ModuleAliasDecl> aliases,
+                                      Map<String, String> cache, Set<String> active) {
+        if (modules.containsKey(name)) return name;
+        if (cache.containsKey(name)) return cache.get(name);
+        Ast.ModuleAliasDecl entry = aliases.get(name);
+        if (entry == null) throw new RuntimeException("Unknown module alias target " + name);
+        if (!active.add(name)) {
+            throw new RuntimeException("Cyclic module alias: " + active + " -> " + name);
+        }
+        String resolved = resolveAlias(entry.target, modules, aliases, cache, active);
+        active.remove(name);
+        cache.put(name, resolved);
+        return resolved;
+    }
+
     /** Argument contravariance and result covariance under structural width. */
     public static boolean matchesFunctor(Ast.FunctorDecl actual, Ast.FunctorTypeDecl target,
                                          Map<String, Ast.ModuleTypeDecl> signatures) {
@@ -128,6 +173,7 @@ public final class ModuleTypeChecker {
 
     public static void check(Ast.Program program) {
         Map<String, Ast.ModuleTypeDecl> signatures = signatures(program);
+        Map<String, String> aliases = resolvedAliases(program);
         Map<String, Ast.FunctorTypeDecl> functorTypes = functorSignatures(program);
         Map<String, Ast.FunctorDecl> allFunctors = new HashMap<>();
         for (Ast.FunctorDecl declared : program.functors) {
@@ -160,6 +206,11 @@ public final class ModuleTypeChecker {
             validateNamedModuleSharing(mod, namedModules, signatures);
             validateMethods(mod.name, mod.signature, mod.methods, mod.typeAliases,
                             signatures, mod.span);
+        }
+        for (Ast.ModuleAliasDecl alias : program.moduleAliases) {
+            if (!alias.name.contains(".") && !reserved.add(alias.name)) {
+                throw new RuntimeException("Duplicate global declaration " + alias.name);
+            }
         }
         for (Ast.FunctorDecl functor : program.functors) {
             if (!reserved.add(functor.name)) {
@@ -311,7 +362,14 @@ public final class ModuleTypeChecker {
                                            Map<String, Ast.ModuleTypeDecl> signatures) {
         Map<String, String> known = new HashMap<>();
         Map<String, Ast.FunctorDecl> functors = new HashMap<>();
-        for (Ast.ModuleDecl module : program.modules) known.put(module.name, module.signature);
+        Map<String, Ast.ModuleDecl> namedModules = new HashMap<>();
+        for (Ast.ModuleDecl module : program.modules) {
+            known.put(module.name, module.signature);
+            namedModules.put(module.name, module);
+        }
+        for (Map.Entry<String, String> alias : resolvedAliases(program).entrySet()) {
+            known.put(alias.getKey(), namedModules.get(alias.getValue()).signature);
+        }
         for (Ast.FunctorDecl functor : program.functors) functors.put(functor.name, functor);
         for (Ast.ModuleDecl module : program.modules) {
             for (Ast.MethodDecl method : module.methods) {
@@ -394,6 +452,12 @@ public final class ModuleTypeChecker {
                                       Map<String, Ast.FunctorDecl> functors) {
         if (expr == null) return null;
         if (expr instanceof Ast.Var variable) return known.get(variable.name);
+        if (expr instanceof Ast.FieldAccess field) {
+            String path = modulePath(field);
+            if (path != null && known.containsKey(path)) return known.get(path);
+            inferModule(field.target, known, signatures, functors);
+            return null;
+        }
         if (expr instanceof Ast.CallExpr call) {
             List<String> inputs = new ArrayList<>();
             for (Ast.Expr arg : call.args) {
@@ -460,6 +524,15 @@ public final class ModuleTypeChecker {
 
     private static String location(Ast.SourceSpan span) {
         return span != null && span.line > 0 ? " at " + span.location() : "";
+    }
+
+    private static String modulePath(Ast.Expr expr) {
+        if (expr instanceof Ast.Var variable) return variable.name;
+        if (expr instanceof Ast.FieldAccess field) {
+            String left = modulePath(field.target);
+            return left == null ? null : left + "." + field.field;
+        }
+        return null;
     }
 
     private static RuntimeException moduleError(Ast.SourceSpan span, String message) {

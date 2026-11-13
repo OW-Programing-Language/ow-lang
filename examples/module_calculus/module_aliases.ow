@@ -1,0 +1,28 @@
+module_type BOX:
+  type token
+  fn issue(x int) -> token
+  fn inspect(x token) -> int
+
+module Warehouse: BOX
+  type token: int
+  fn issue(x int) -> token:
+    return: x
+  fn inspect(x token) -> int:
+    return: x
+
+# Alias syntax borrows OCaml's module A = B, and supports dotted export paths.
+module Inventory = Warehouse
+module Shop.Inventory = Inventory
+
+module_type RESULT:
+  fn read() -> int
+
+functor UseWarehouse(Source: BOX) -> RESULT:
+  fn read() -> int:
+    return: Source.inspect(Source.issue(8))
+
+main:
+  call: assert(Warehouse.inspect(Shop.Inventory.issue(5)) == 5)
+  set useIt RESULT: UseWarehouse(Shop.Inventory)
+  call: assert(useIt.read() == 8)
+  print: "PASS transparent module alias and namespace"
