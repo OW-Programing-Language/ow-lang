@@ -359,6 +359,25 @@ public/private visibility. It does not yet support mutually recursive
 module bindings, nested functor declarations/anonymous structs, local
 `include struct ... end`, or the complete OCaml module grammar.
 
+## LLVM lowering of statically resolved opaque integer types
+
+AOT compilation supports statically resolvable **abstract module types whose
+implementation is `int`**, including first-order `with_type` aliases through
+a functor input. The module checker validates nominal token identity before
+LLVM lowering; then the compiler erases the verified integer-backed token to
+i32, specializing its methods as ordinary LLVM functions.
+
+```sh
+ow llvm examples/module_calculus/native_llvm_opaque.ow /tmp/opaque.ll
+clang /tmp/opaque.ll -o /tmp/opaque
+/tmp/opaque  # prints 26
+```
+
+This is **not** generalized representation-polymorphic lowering or compilation
+of packed first-class modules. Dynamic dispatch, non-integer representations,
+and higher-order functor values continue to fail explicitly rather than being
+silently miscompiled.
+
 ## Differential OCaml conformance suite
 
 `tools/ocaml_conformance.py` builds and runs paired OCaml and OW source files

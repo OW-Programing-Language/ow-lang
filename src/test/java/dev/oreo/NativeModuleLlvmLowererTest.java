@@ -81,8 +81,8 @@ public class NativeModuleLlvmLowererTest {
         assertTrue(ex.getMessage().contains("first-class module package values"));
     }
 
-    @Test public void opaqueModuleRequiresALoweringStrategy() {
-        UnsupportedOperationException ex = assertThrows(UnsupportedOperationException.class, () -> ir("""
+    @Test public void opaqueIntegerModuleCanBeLowered() {
+        String llvm = ir("""
                 module_type API:
                   type token
                   fn make(v int) -> token
@@ -92,8 +92,99 @@ public class NativeModuleLlvmLowererTest {
                     return: v
                 main:
                   set x: M.make(3)
+                """);
+        assertTrue(llvm.contains("define i32 @__ow_module_"));
+    }
+
+    @Test public void opaqueIntegerTypeIsErasedOnlyAfterStaticValidation() {
+        String generated = ir("""
+                module_type BOX:
+                  type token
+                  fn wrap(value int) -> token
+                  fn unwrap(value token) -> int
+                module First: BOX
+                  type token: int
+                  fn wrap(value int) -> token:
+                    return: value + 3
+                  fn unwrap(value token) -> int:
+                    return: value
+                main:
+                  set t: First.wrap(8)
+                  print: First.unwrap(t)
+                """);
+        assertTrue(generated.contains("define i32 @__ow_module_"));
+        assertTrue(generated.contains("call i32 @__ow_module_"));
+    }
+
+    @Test public void dependentAbstractTypeCanLowerToItsCapturedIntegerRepresentation() {
+        String generated = ir("""
+                module_type BOX:
+                  type token
+                  fn wrap(value int) -> token
+                  fn unwrap(value token) -> int
+                module First: BOX
+                  type token: int
+                  fn wrap(value int) -> token:
+                    return: value + 3
+                  fn unwrap(value token) -> int:
+                    return: value
+                functor Forward(Source: BOX) -> BOX with_type token = Source.token:
+                  type token: Source.token
+                  fn wrap(value int) -> token:
+                    return: Source.wrap(value)
+                  fn unwrap(value token) -> int:
+                    return: Source.unwrap(value)
+                main:
+                  set service BOX: Forward(First)
+                  print: service.unwrap(service.wrap(10))
+                """);
+        assertTrue(generated.contains("define i32 @__ow_module_"));
+        assertTrue(generated.contains("call i32 @__ow_module_"));
+    }
+
+    @Test public void opaqueTokenFromDifferentModuleFailsBeforeLowering() {
+        RuntimeException failure = assertThrows(RuntimeException.class, () -> ir("""
+                module_type BOX:
+                  type token
+                  fn wrap(value int) -> token
+                  fn unwrap(value token) -> int
+                module A: BOX
+                  type token: int
+                  fn wrap(value int) -> token:
+                    return: value
+                  fn unwrap(value token) -> int:
+                    return: value
+                module B: BOX
+                  type token: int
+                  fn wrap(value int) -> token:
+                    return: value
+                  fn unwrap(value token) -> int:
+                    return: value
+                main:
+                  set t: A.wrap(2)
+                  print: B.unwrap(t)
                 """));
-        assertTrue(ex.getMessage().contains("abstract type lowering"));
+        assertTrue(failure.getMessage().contains("abstract type mismatch"));
+    }
+
+    @Test public void opaqueStringRepresentationIsNotMiscompiledAsInteger() {
+        UnsupportedOperationException failure = assertThrows(
+                UnsupportedOperationException.class, () -> ir("""
+                module_type BOX:
+                  type token
+                  fn wrap(value string) -> token
+                  fn unwrap(value token) -> string
+                module S: BOX
+                  type token: string
+                  fn wrap(value string) -> token:
+                    return: value
+                  fn unwrap(value token) -> string:
+                    return: value
+                main:
+                  set t: S.wrap("hello")
+                  print: S.unwrap(t)
+                """));
+        assertTrue(failure.getMessage().contains("only i32-representable"));
     }
 
     @Test public void cliEmitsLLVMWithoutExecutingProgram() throws Exception {
