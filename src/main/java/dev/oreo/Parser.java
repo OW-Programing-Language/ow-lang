@@ -170,6 +170,9 @@ public class Parser {
             if (sharing.putIfAbsent(member, path) != null)
                 throw err("duplicate with_type constraint " + member);
         }
+        // A trailing colon is accepted when a with_type constraint is present.
+        // Existing 'module Name: SIGNATURE' syntax remains unchanged.
+        if (!sharing.isEmpty()) match(Type.COLON);
         ModuleMembers members = parseModuleMethods();
         if (members.returnedFunctor != null)
             throw err("module may not return a functor");
