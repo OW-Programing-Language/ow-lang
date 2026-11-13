@@ -164,6 +164,7 @@ public final class ModuleTypeChecker {
             }
         }
         verifyApplications(program, signatures);
+        StaticModuleValueChecker.check(program, signatures);
     }
 
     private static void validateDependentPath(Ast.FunctorDecl functor,

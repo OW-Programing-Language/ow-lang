@@ -1,0 +1,282 @@
+package dev.oreo;
+
+import java.util.*;
+
+/**
+ * Conservative pre-main semantic analysis for statically known module paths.
+ *
+ * Rejects incompatible abstract type identities, primitive argument mismatches
+ * and opaque type escapes before executing main. Unknown/dynamic expressions
+ * remain checked by the interpreter at runtime.
+ */
+public final class StaticModuleValueChecker {
+    private final Map<String, Ast.ModuleTypeDecl> signatures;
+    private final Map<String, Ast.FunctorDecl> functors = new HashMap<>();
+    private final Map<String, ModuleRef> moduleValues = new HashMap<>();
+    private final Map<String, ValueType> valueTypes = new HashMap<>();
+    private long freshCounter = 0;
+
+    private record ModuleRef(String signature, String identity,
+                             Map<String, String> aliases, Map<String, ModuleRef> captured) {}
+    private record ValueType(String primitive, String abstractIdentity) {
+        static ValueType primitive(String name) { return new ValueType(name, null); }
+        static ValueType opaque(String identity) { return new ValueType(null, identity); }
+    }
+
+    private StaticModuleValueChecker(Map<String, Ast.ModuleTypeDecl> signatures) {
+        this.signatures = signatures;
+    }
+
+    public static void check(Ast.Program program, Map<String, Ast.ModuleTypeDecl> signatures) {
+        StaticModuleValueChecker checker = new StaticModuleValueChecker(signatures);
+        for (Ast.ModuleDecl module : program.modules) {
+            checker.moduleValues.put(module.name,
+                    new ModuleRef(module.signature, module.name, module.typeAliases, Map.of()));
+        }
+        for (Ast.FunctorDecl functor : program.functors) {
+            checker.functors.put(functor.name, functor);
+        }
+        checker.analyze(program.mainBody);
+    }
+
+    private void analyze(List<Ast.Stmt> body) {
+        if (body == null) return;
+        for (Ast.Stmt stmt : body) {
+            if (stmt instanceof Ast.SetStmt set) {
+                ModuleRef module = inferModule(set.value);
+                if (module != null) {
+                    moduleValues.put(set.name, module);
+                    valueTypes.remove(set.name);
+                } else {
+                    ValueType type = inferValue(set.value);
+                    if (set.typeName != null && type != null &&
+                            !signatures.containsKey(set.typeName)) {
+                        ensureAssignable(set.typeName, type, -1);
+                    }
+                    if (type != null) valueTypes.put(set.name, type);
+                    else valueTypes.remove(set.name);
+                    moduleValues.remove(set.name);
+                }
+            } else if (stmt instanceof Ast.PrintStmt print) {
+                inferValue(print.value);
+            } else if (stmt instanceof Ast.CallStmt call) {
+                inferValue(call.call);
+            } else if (stmt instanceof Ast.ReturnStmt ret) {
+                inferValue(ret.value);
+            } else if (stmt instanceof Ast.IfStmt branch) {
+                inferValue(branch.condition);
+                branchOf(branch.thenBody);
+                branchOf(branch.elseBody);
+            } else if (stmt instanceof Ast.WhileStmt loop) {
+                inferValue(loop.condition);
+                branchOf(loop.body);
+            } else if (stmt instanceof Ast.TryStmt tr) {
+                branchOf(tr.tryBody);
+                branchOf(tr.catchBody);
+            } else if (stmt instanceof Ast.SwitchStmt sw) {
+                inferValue(sw.subject);
+                for (Ast.CaseClause clause : sw.cases) {
+                    for (Ast.Expr expr : clause.values) inferValue(expr);
+                    branchOf(clause.body);
+                }
+                branchOf(sw.defaultBody);
+            } else if (stmt instanceof Ast.SetFieldStmt set) {
+                inferValue(set.target);
+                inferValue(set.value);
+            } else if (stmt instanceof Ast.SetIndexStmt set) {
+                inferValue(set.index);
+                inferValue(set.value);
+            } else if (stmt instanceof Ast.SaveStmt save) {
+                inferValue(save.record);
+            } else if (stmt instanceof Ast.DeleteStmt del) {
+                inferValue(del.where);
+            } else if (stmt instanceof Ast.RespondStmt response) {
+                inferValue(response.value);
+            } else if (stmt instanceof Ast.ServeStmt serve) {
+                inferValue(serve.port);
+            } else if (stmt instanceof Ast.RouteStmt route) {
+                branchOf(route.body);
+            }
+        }
+    }
+
+    /** Branch-local bindings cannot leak into the parent, but are still checked. */
+    private void branchOf(List<Ast.Stmt> body) {
+        Map<String, ModuleRef> savedModules = new HashMap<>(moduleValues);
+        Map<String, ValueType> savedValues = new HashMap<>(valueTypes);
+        analyze(body);
+        moduleValues.clear();
+        moduleValues.putAll(savedModules);
+        valueTypes.clear();
+        valueTypes.putAll(savedValues);
+    }
+
+    private ModuleRef inferModule(Ast.Expr expr) {
+        if (expr instanceof Ast.Var variable) return moduleValues.get(variable.name);
+        if (!(expr instanceof Ast.CallExpr call)) return null;
+        Ast.FunctorDecl functor = functors.get(call.name);
+        if (functor == null || call.args.size() != 1 || functor.returnedFunctor != null) {
+            return null;
+        }
+        ModuleRef argument = inferModule(call.args.get(0));
+        if (argument == null || !signatures.containsKey(functor.inputSignature)) return null;
+        String identity = functor.generative
+                ? functor.name + "#static" + (++freshCounter)
+                : functor.name + "(" + argument.identity + ")";
+        return new ModuleRef(functor.outputSignature, identity, functor.typeAliases,
+                Map.of(functor.argument, argument));
+    }
+
+    private ValueType typeMember(ModuleRef module, String member) {
+        Ast.ModuleTypeDecl declaration = signatures.get(module.signature);
+        if (declaration == null) return null;
+        String manifest = declaration.manifestTypes.get(member);
+        if (manifest != null) return ValueType.primitive(manifest);
+        String alias = module.aliases.get(member);
+        if (alias == null) return null;
+        if (alias.contains(".")) {
+            String[] path = alias.split("\\.", 2);
+            ModuleRef dependency = module.captured.get(path[0]);
+            return dependency == null ? null : typeMember(dependency, path[1]);
+        }
+        return ValueType.opaque(module.identity + "." + member);
+    }
+
+    private ValueType inferValue(Ast.Expr expr) {
+        if (expr == null) return null;
+        if (expr instanceof Ast.IntLit) return ValueType.primitive("int");
+        if (expr instanceof Ast.FloatLit) return ValueType.primitive("float");
+        if (expr instanceof Ast.StringLit) return ValueType.primitive("string");
+        if (expr instanceof Ast.BoolLit) return ValueType.primitive("bool");
+        if (expr instanceof Ast.Var var) return valueTypes.get(var.name);
+        if (expr instanceof Ast.MethodCall call) {
+            ModuleRef target = inferModule(call.target);
+            if (target != null) {
+                Ast.ModuleTypeDecl declaration = signatures.get(target.signature);
+                if (declaration == null) return null;
+                Ast.MethodSig method = declaration.methods.stream()
+                        .filter(m -> m.name.equals(call.method)).findFirst().orElse(null);
+                if (method == null) return null; // already covered by ModuleTypeChecker
+                for (int i = 0; i < call.args.size(); i++) {
+                    ValueType passed = inferValue(call.args.get(i));
+                    if (passed == null || i >= method.paramTypes.size()) continue;
+                    String required = method.paramTypes.get(i);
+                    if (required == null) continue;
+                    if (declaration.abstractTypes.contains(required)) {
+                        ValueType expected = typeMember(target, required);
+                        if (expected != null) {
+                            if (expected.primitive != null && passed.abstractIdentity != null) {
+                                throw error(call.line, "manifest type " + declaration.name +
+                                        "." + required + " expects " + expected.primitive +
+                                        "; opaque type " + passed.abstractIdentity +
+                                        " cannot be used as " + expected.primitive);
+                            }
+                            ensureSame(expected, passed, call.line);
+                        }
+                    } else {
+                        ensureAssignable(required, passed, call.line);
+                    }
+                }
+                if (method.returnType == null) return null;
+                if (declaration.abstractTypes.contains(method.returnType)) {
+                    return typeMember(target, method.returnType);
+                }
+                return ValueType.primitive(method.returnType);
+            }
+            inferValue(call.target);
+            for (Ast.Expr arg : call.args) inferValue(arg);
+            return null;
+        }
+        if (expr instanceof Ast.CallExpr call) {
+            for (Ast.Expr arg : call.args) inferValue(arg);
+            return null;
+        }
+        if (expr instanceof Ast.BinOp operation) {
+            ValueType left = inferValue(operation.left);
+            ValueType right = inferValue(operation.right);
+            if ((left != null && left.abstractIdentity != null) ||
+                (right != null && right.abstractIdentity != null)) {
+                throw new RuntimeException("Module type error: opaque abstract type escapes through arithmetic");
+            }
+            if ("+".equals(operation.op) &&
+                (isString(left) || isString(right))) return ValueType.primitive("string");
+            if (left != null && "float".equals(left.primitive)) return left;
+            if (right != null && "float".equals(right.primitive)) return right;
+            return ValueType.primitive("int");
+        }
+        if (expr instanceof Ast.Compare operation) {
+            inferValue(operation.left);
+            inferValue(operation.right);
+            return ValueType.primitive("bool");
+        }
+        if (expr instanceof Ast.ArrayLit array) {
+            for (Ast.Expr value : array.elements) inferValue(value);
+            return ValueType.primitive("array");
+        }
+        if (expr instanceof Ast.MapLit map) {
+            for (Ast.Expr value : map.values) inferValue(value);
+            return null;
+        }
+        if (expr instanceof Ast.IndexExpr idx) {
+            inferValue(idx.target);
+            inferValue(idx.index);
+            return null;
+        }
+        if (expr instanceof Ast.FieldAccess field) {
+            inferValue(field.target);
+            return null;
+        }
+        if (expr instanceof Ast.NewExpr call) {
+            for (Ast.Expr arg : call.args) inferValue(arg);
+            return null;
+        }
+        if (expr instanceof Ast.FindExpr find) {
+            inferValue(find.where);
+            return null;
+        }
+        return null;
+    }
+
+    private static boolean isString(ValueType type) {
+        return type != null && "string".equals(type.primitive);
+    }
+
+    private static void ensureAssignable(String required, ValueType provided, int line) {
+        if (provided == null) return;
+        if (provided.abstractIdentity != null) {
+            throw error(line, "opaque type " + provided.abstractIdentity +
+                    " cannot be used as " + required);
+        }
+        String actual = provided.primitive;
+        if (required.equals(actual) ||
+                (required.equals("float") || required.equals("double")) &&
+                  (actual.equals("float") || actual.equals("int")) ||
+                (required.equals("bool") || required.equals("boolean")) &&
+                  (actual.equals("bool") || actual.equals("int")) ||
+                (required.equals("str") && actual.equals("string"))) {
+            return;
+        }
+        // Only reject provably incompatible primitive types; custom OW types
+        // are still handled by the interpreter.
+        if (Set.of("int", "float", "double", "string", "str", "bool", "boolean", "array").contains(required)) {
+            throw error(line, "expected " + required + " but got " + actual);
+        }
+    }
+
+    private static void ensureSame(ValueType expected, ValueType actual, int line) {
+        if (expected.abstractIdentity != null) {
+            if (!expected.abstractIdentity.equals(actual.abstractIdentity)) {
+                throw error(line, "Abstract type mismatch (static abstract type mismatch): expected " +
+                        expected.abstractIdentity + ", got " +
+                        (actual.abstractIdentity != null ? actual.abstractIdentity : actual.primitive));
+            }
+        } else if (expected.primitive != null) {
+            ensureAssignable(expected.primitive, actual, line);
+        }
+    }
+
+    private static RuntimeException error(int line, String message) {
+        return new RuntimeException("Module type error" +
+                (line > 0 ? " at line " + line : "") + ": " + message);
+    }
+}
