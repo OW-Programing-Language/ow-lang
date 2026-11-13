@@ -13,7 +13,7 @@ interface SorterFunctor:
 class Ascending(Ordered):
   fn compare(a int, b int) -> int:
     if: a < b
-      return: -1
+      return: 0 - 1
     if: a > b
       return: 1
     return: 0
@@ -21,7 +21,7 @@ class Ascending(Ordered):
 class Descending(Ordered):
   fn compare(a int, b int) -> int:
     if: a > b
-      return: -1
+      return: 0 - 1
     if: a < b
       return: 1
     return: 0
