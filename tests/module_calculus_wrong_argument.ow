@@ -1,0 +1,13 @@
+module_type ORDERED:
+  fn compare(a int, b int) -> int
+module_type ANSWER:
+  fn get() -> int
+module Broken: ANSWER
+  fn get() -> int:
+    return: 1
+functor NeedOrdered(Arg: ORDERED) -> ANSWER:
+  fn get() -> int:
+    return: 10
+main:
+  set result: NeedOrdered(Broken)
+  print: "must fail"

@@ -1,0 +1,7 @@
+# An OCaml-inspired functor: module ORDERED -> module CHOOSER.
+# A module parameter is a public signature, not an app config object.
+functor MakeChooser(Order: ORDERED) -> CHOOSER:
+  fn choose(a int, b int) -> int:
+    if: Order.compare(a, b) < 1
+      return: a
+    return: b

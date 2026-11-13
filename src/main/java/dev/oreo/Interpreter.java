@@ -62,6 +62,26 @@ public class Interpreter {
         @Override public String toString() { return "<" + cls.name + ">"; }
     }
 
+    /** A public module view: only exports listed in the signature are callable. */
+    public static final class OwModule {
+        public final String name;
+        public final String signature;
+        public final Map<String, Ast.MethodDecl> definitions;
+        public final Map<String, Object> captured;
+        OwModule(String name, String signature, List<Ast.MethodDecl> methods,
+                 Map<String, Object> captured) {
+            this.name = name;
+            this.signature = signature;
+            this.definitions = new LinkedHashMap<>();
+            for (Ast.MethodDecl method : methods) definitions.put(method.name, method);
+            this.captured = captured;
+        }
+        @Override public String toString() { return "<module " + name + " : " + signature + ">"; }
+    }
+
+    private final Map<String, Ast.ModuleTypeDecl> moduleTypes = new LinkedHashMap<>();
+    private final Map<String, Ast.FunctorDecl> moduleFunctors = new LinkedHashMap<>();
+
     private final PrintStream out;
     private final InputProvider inputProvider;
     private final Map<String, Ast.FnDecl> functions = new HashMap<>();
@@ -128,6 +148,39 @@ public class Interpreter {
             if (models.containsKey(m.name)) throw new RuntimeException("Duplicate model: " + m.name);
             models.put(m.name, m);
             db.put(m.name, new ArrayList<>());
+        }
+        // Module signatures are checked before any user code is executed.
+        // This is a load-time semantic check, not a general static type checker.
+        ModuleTypeChecker.check(program);
+        moduleTypes.putAll(ModuleTypeChecker.signatures(program));
+        for (Ast.ModuleTypeDecl sig : program.moduleTypes) {
+            for (Ast.MethodSig method : sig.methods) {
+                for (String type : method.paramTypes) {
+                    requireKnownType(type, sig.name + "." + method.name);
+                }
+                requireKnownType(method.returnType, sig.name + "." + method.name);
+            }
+        }
+        for (Ast.ModuleDecl mod : program.modules) {
+            for (Ast.MethodDecl method : mod.methods) {
+                for (String type : method.paramTypes) {
+                    requireKnownType(type, mod.name + "." + method.name);
+                }
+                requireKnownType(method.returnType, mod.name + "." + method.name);
+            }
+            if (globals.containsKey(mod.name)) {
+                throw new RuntimeException("Duplicate module global " + mod.name);
+            }
+            globals.put(mod.name, new OwModule(mod.name, mod.signature, mod.methods, Map.of()));
+        }
+        for (Ast.FunctorDecl functor : program.functors) {
+            moduleFunctors.put(functor.name, functor);
+            for (Ast.MethodDecl method : functor.methods) {
+                for (String type : method.paramTypes) {
+                    requireKnownType(type, functor.name + "." + method.name);
+                }
+                requireKnownType(method.returnType, functor.name + "." + method.name);
+            }
         }
         // A class may declare an interface only if it supplies every public
         // method with the required arity. Validate before running any main code.
@@ -393,11 +446,14 @@ public class Interpreter {
         }
         if (e instanceof Ast.MethodCall mc) {
             Object target = evalExpr(mc.target, env);
+            List<Object> args = new ArrayList<>();
+            for (Ast.Expr a : mc.args) args.add(evalExpr(a, env));
+            if (target instanceof OwModule module) {
+                return invokeModuleExport(module, mc.method, args);
+            }
             if (!(target instanceof OwObject obj)) {
                 throw new RuntimeException("Cannot call method '" + mc.method + "' on " + formatValue(target));
             }
-            List<Object> args = new ArrayList<>();
-            for (Ast.Expr a : mc.args) args.add(evalExpr(a, env));
             boolean external = env.get("this") != obj;
             return invokeMethod(obj, mc.method, args, external);
         }
@@ -443,6 +499,26 @@ public class Interpreter {
             return compare(c.op, l, r) ? 1 : 0;
         }
         if (e instanceof Ast.CallExpr call) {
+            if (moduleFunctors.containsKey(call.name)) {
+                Ast.FunctorDecl functor = moduleFunctors.get(call.name);
+                if (call.args.size() != 1) {
+                    throw new RuntimeException("Functor " + functor.name +
+                            " expects exactly one module argument");
+                }
+                Object argument = evalExpr(call.args.get(0), env);
+                if (!(argument instanceof OwModule mod)) {
+                    throw new RuntimeException("Functor " + functor.name +
+                            " requires module " + functor.inputSignature + ", got " + formatValue(argument));
+                }
+                Ast.ModuleTypeDecl actual = moduleTypes.get(mod.signature);
+                Ast.ModuleTypeDecl expected = moduleTypes.get(functor.inputSignature);
+                if (!ModuleTypeChecker.matches(actual, expected)) {
+                    throw new RuntimeException("Functor " + functor.name + " requires " +
+                            functor.inputSignature + ", got " + mod.signature);
+                }
+                return new OwModule(functor.name + "(" + mod.name + ")", functor.outputSignature,
+                        functor.methods, Map.of(functor.argument, mod));
+            }
             if (isBuiltin(call.name)) {
                 return evalBuiltin(call, env);
             }
@@ -504,6 +580,45 @@ public class Interpreter {
         return obj;
     }
 
+    private Object invokeModuleExport(OwModule module, String name, List<Object> args) {
+        Ast.ModuleTypeDecl signature = moduleTypes.get(module.signature);
+        boolean exposed = false;
+        for (Ast.MethodSig member : signature.methods) {
+            if (member.name.equals(name)) { exposed = true; break; }
+        }
+        if (!exposed) {
+            throw new RuntimeException("Module " + module.name + " does not export " + name +
+                    " under signature " + signature.name);
+        }
+        Ast.MethodDecl method = module.definitions.get(name);
+        if (method == null) {
+            throw new RuntimeException("Module " + module.name + " lacks export " + name);
+        }
+        if (method.params.size() != args.size()) {
+            throw new RuntimeException("Module " + module.name + "." + name +
+                    " expects " + method.params.size() + " args, got " + args.size());
+        }
+        Map<String, Object> local = new HashMap<>(module.captured);
+        for (int i = 0; i < method.params.size(); i++) {
+            String paramType = method.paramTypes.get(i);
+            if (paramType != null) {
+                checkType(paramType, args.get(i), "argument " + (i + 1) +
+                        " of " + module.name + "." + name);
+            }
+            local.put(method.params.get(i), args.get(i));
+        }
+        Object result = 0;
+        try {
+            execBlock(method.body, local);
+        } catch (ReturnSignal signal) {
+            result = signal.value;
+        }
+        if (method.returnType != null) {
+            checkType(method.returnType, result, "return value of " + module.name + "." + name);
+        }
+        return result;
+    }
+
     private Object invokeMethod(OwObject obj, String name, List<Object> args, boolean external) {
         Ast.MethodDecl m = findMethod(obj.cls, name);
         if (m == null) throw new RuntimeException("Class " + obj.cls.name + " has no method '" + name + "'");
@@ -544,7 +659,8 @@ public class Interpreter {
         if (name == null) return;
         if (Set.of("int", "string", "str", "bool", "boolean", "array", "list", "float", "double")
                 .contains(name)) return;
-        if (classes.containsKey(name) || interfaces.containsKey(name) || enums.containsKey(name)) return;
+        if (classes.containsKey(name) || interfaces.containsKey(name) ||
+                enums.containsKey(name) || moduleTypes.containsKey(name)) return;
         throw new RuntimeException("Unknown type '" + name + "' in " + context);
     }
 
@@ -840,8 +956,12 @@ public class Interpreter {
                 } else if (classes.containsKey(typeName) || interfaces.containsKey(typeName)) {
                     if (!(value instanceof OwObject obj) || !classMatchesType(obj.cls, typeName))
                         throw typeErr(typeName, value, what);
-                }
-                else {
+                } else if (moduleTypes.containsKey(typeName)) {
+                    if (!(value instanceof OwModule module) ||
+                        !ModuleTypeChecker.matches(moduleTypes.get(module.signature), moduleTypes.get(typeName))) {
+                        throw typeErr(typeName, value, what);
+                    }
+                } else {
                     throw new RuntimeException("Unknown type '" + typeName + "' in " + what);
                 }
             }
@@ -854,6 +974,7 @@ public class Interpreter {
     }
 
     private String typeNameOf(Object v) {
+        if (v instanceof OwModule m) return m.signature;
         if (v instanceof Integer) return "int";
         if (v instanceof String) return "string";
         if (v instanceof Boolean) return "bool";

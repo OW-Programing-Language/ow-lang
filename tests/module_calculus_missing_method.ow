@@ -1,0 +1,7 @@
+module_type REQUIRED:
+  fn get() -> int
+module Broken: REQUIRED
+  fn other() -> int:
+    return: 1
+main:
+  print: "must fail before main"

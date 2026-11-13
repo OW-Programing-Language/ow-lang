@@ -1,0 +1,10 @@
+# Signatures are public contracts; implementations can have extra members.
+module_type ORDERED:
+  fn compare(a int, b int) -> int
+
+module_type FULL_ORDER:
+  fn compare(a int, b int) -> int
+  fn label() -> string
+
+module_type CHOOSER:
+  fn choose(a int, b int) -> int

@@ -11,6 +11,9 @@ public class Ast {
         public final List<InterfaceDecl> interfaces;
         public final List<ClassDecl> classes;
         public final List<ModelDecl> models;
+        public final List<ModuleTypeDecl> moduleTypes;
+        public final List<ModuleDecl> modules;
+        public final List<FunctorDecl> functors;
         public final List<Stmt> mainBody; // may be null in imported (non-entry) files
 
         public Program(List<String> imports,
@@ -26,7 +29,67 @@ public class Ast {
             this.interfaces = interfaces;
             this.classes = classes;
             this.models = models;
+            this.moduleTypes = List.of();
+            this.modules = List.of();
+            this.functors = List.of();
             this.mainBody = mainBody;
+        }
+
+        public Program(List<String> imports,
+                       List<FnDecl> functions,
+                       List<EnumDecl> enums,
+                       List<InterfaceDecl> interfaces,
+                       List<ClassDecl> classes,
+                       List<ModelDecl> models,
+                       List<ModuleTypeDecl> moduleTypes,
+                       List<ModuleDecl> modules,
+                       List<FunctorDecl> functors,
+                       List<Stmt> mainBody) {
+            this.imports = imports;
+            this.functions = functions;
+            this.enums = enums;
+            this.interfaces = interfaces;
+            this.classes = classes;
+            this.models = models;
+            this.moduleTypes = moduleTypes;
+            this.modules = modules;
+            this.functors = functors;
+            this.mainBody = mainBody;
+        }
+    }
+
+    /** Public module signature. Extra implementation methods remain hidden. */
+    public static class ModuleTypeDecl {
+        public final String name;
+        public final List<MethodSig> methods;
+        public ModuleTypeDecl(String name, List<MethodSig> methods) {
+            this.name = name;
+            this.methods = methods;
+        }
+    }
+
+    /** Named module implementation as a statically checked set of exports. */
+    public static class ModuleDecl {
+        public final String name, signature;
+        public final List<MethodDecl> methods;
+        public ModuleDecl(String name, String signature, List<MethodDecl> methods) {
+            this.name = name;
+            this.signature = signature;
+            this.methods = methods;
+        }
+    }
+
+    /** Module-to-module functor with a checked input and output signature. */
+    public static class FunctorDecl {
+        public final String name, argument, inputSignature, outputSignature;
+        public final List<MethodDecl> methods;
+        public FunctorDecl(String name, String argument, String inputSignature,
+                           String outputSignature, List<MethodDecl> methods) {
+            this.name = name;
+            this.argument = argument;
+            this.inputSignature = inputSignature;
+            this.outputSignature = outputSignature;
+            this.methods = methods;
         }
     }
 

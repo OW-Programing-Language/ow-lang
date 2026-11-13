@@ -1,0 +1,9 @@
+module_type PUBLIC:
+  fn visible() -> int
+module Example: PUBLIC
+  fn visible() -> int:
+    return: 1
+  fn hidden() -> int:
+    return: 99
+main:
+  print: Example.hidden()
