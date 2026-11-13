@@ -6,6 +6,7 @@ on:
       - 'src/**'
       - 'examples/module_calculus/**'
       - 'tests/module_calculus_*.ow'
+      - 'tests/module_abstract_*.ow'
       - '.github/workflows/native-modules.yml'
       - 'pom.xml'
   pull_request:
@@ -24,9 +25,11 @@ jobs:
         run: mvn -B clean test package
       - name: Execute multi-file module and functor example
         run: java -jar target/OwIDE.jar run examples/module_calculus/main.ow
+      - name: Verify opaque abstract type members
+        run: java -jar target/OwIDE.jar run examples/module_calculus/abstract_types.ow
       - name: Reject malformed modules, functor arguments, and hidden exports
         run: |
-          for file in tests/module_calculus_*.ow; do
+          for file in tests/module_calculus_*.ow tests/module_abstract_*.ow; do
             if java -jar target/OwIDE.jar run "$file"; then
               echo "ERROR: invalid module program was accepted: $file"
               exit 1

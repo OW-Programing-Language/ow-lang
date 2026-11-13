@@ -62,9 +62,14 @@ public class Ast {
     public static class ModuleTypeDecl {
         public final String name;
         public final List<MethodSig> methods;
+        public final List<String> abstractTypes;
         public ModuleTypeDecl(String name, List<MethodSig> methods) {
+            this(name, methods, List.of());
+        }
+        public ModuleTypeDecl(String name, List<MethodSig> methods, List<String> abstractTypes) {
             this.name = name;
             this.methods = methods;
+            this.abstractTypes = abstractTypes;
         }
     }
 
@@ -72,10 +77,16 @@ public class Ast {
     public static class ModuleDecl {
         public final String name, signature;
         public final List<MethodDecl> methods;
+        public final Map<String, String> typeAliases;
         public ModuleDecl(String name, String signature, List<MethodDecl> methods) {
+            this(name, signature, methods, Map.of());
+        }
+        public ModuleDecl(String name, String signature, List<MethodDecl> methods,
+                          Map<String, String> typeAliases) {
             this.name = name;
             this.signature = signature;
             this.methods = methods;
+            this.typeAliases = typeAliases;
         }
     }
 
@@ -83,13 +94,20 @@ public class Ast {
     public static class FunctorDecl {
         public final String name, argument, inputSignature, outputSignature;
         public final List<MethodDecl> methods;
+        public final Map<String, String> typeAliases;
         public FunctorDecl(String name, String argument, String inputSignature,
                            String outputSignature, List<MethodDecl> methods) {
+            this(name, argument, inputSignature, outputSignature, methods, Map.of());
+        }
+        public FunctorDecl(String name, String argument, String inputSignature,
+                           String outputSignature, List<MethodDecl> methods,
+                           Map<String, String> typeAliases) {
             this.name = name;
             this.argument = argument;
             this.inputSignature = inputSignature;
             this.outputSignature = outputSignature;
             this.methods = methods;
+            this.typeAliases = typeAliases;
         }
     }
 

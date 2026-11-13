@@ -1,0 +1,25 @@
+# Opaque type members: representation 'int' is hidden behind each module's own token identity.
+module_type BOX:
+  type token
+  fn wrap(value int) -> token
+  fn unwrap(value token) -> int
+
+module FirstBox: BOX
+  type token: int
+  fn wrap(value int) -> token:
+    return: value
+  fn unwrap(value token) -> int:
+    return: value
+
+module SecondBox: BOX
+  type token: int
+  fn wrap(value int) -> token:
+    return: value
+  fn unwrap(value token) -> int:
+    return: value
+
+main:
+  set item: FirstBox.wrap(25)
+  call: assert(FirstBox.unwrap(item) == 25, "first box")
+  call: assert(SecondBox.unwrap(SecondBox.wrap(7)) == 7, "second box")
+  print: "PASS sealed abstract type members"

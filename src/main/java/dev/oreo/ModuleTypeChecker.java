@@ -22,6 +22,12 @@ public final class ModuleTypeChecker {
             if (signatures.putIfAbsent(sig.name, sig) != null) {
                 throw new RuntimeException("Duplicate module_type " + sig.name);
             }
+            Set<String> memberTypes = new HashSet<>();
+            for (String abstractType : sig.abstractTypes) {
+                if (!memberTypes.add(abstractType)) {
+                    throw new RuntimeException("Duplicate abstract type " + sig.name + "." + abstractType);
+                }
+            }
             Set<String> methods = new HashSet<>();
             for (Ast.MethodSig method : sig.methods) {
                 if (!methods.add(method.name)) {
@@ -47,7 +53,7 @@ public final class ModuleTypeChecker {
             if (!reserved.add(mod.name)) {
                 throw new RuntimeException("Duplicate global declaration " + mod.name);
             }
-            validateMethods(mod.name, mod.signature, mod.methods, signatures);
+            validateMethods(mod.name, mod.signature, mod.methods, mod.typeAliases, signatures);
         }
         for (Ast.FunctorDecl functor : program.functors) {
             if (!reserved.add(functor.name)) {
@@ -61,7 +67,7 @@ public final class ModuleTypeChecker {
                 throw new RuntimeException("Functor " + functor.name + " shadows its own name");
             }
             validateMethods("functor " + functor.name, functor.outputSignature,
-                    functor.methods, signatures);
+                    functor.methods, functor.typeAliases, signatures);
         }
         verifyApplications(program, signatures);
     }
@@ -227,10 +233,17 @@ public final class ModuleTypeChecker {
 
     private static void validateMethods(String owner, String signatureName,
                                         List<Ast.MethodDecl> methods,
+                                        Map<String, String> typeAliases,
                                         Map<String, Ast.ModuleTypeDecl> signatures) {
         Ast.ModuleTypeDecl signature = signatures.get(signatureName);
         if (signature == null) {
             throw new RuntimeException(owner + " references unknown module_type " + signatureName);
+        }
+        for (String member : signature.abstractTypes) {
+            if (!typeAliases.containsKey(member)) {
+                throw new RuntimeException(owner + " must define abstract type " +
+                        signatureName + "." + member + " using 'type " + member + ": concrete_type'");
+            }
         }
         Map<String, Ast.MethodDecl> supplied = new HashMap<>();
         for (Ast.MethodDecl method : methods) {
@@ -278,6 +291,7 @@ public final class ModuleTypeChecker {
         if (actual == null || required == null) return false;
         Map<String, Ast.MethodSig> exposed = new HashMap<>();
         for (Ast.MethodSig method : actual.methods) exposed.put(method.name, method);
+        if (!actual.abstractTypes.containsAll(required.abstractTypes)) return false;
         for (Ast.MethodSig expected : required.methods) {
             Ast.MethodSig member = exposed.get(expected.name);
             if (member == null || member.params.size() != expected.params.size()) return false;
