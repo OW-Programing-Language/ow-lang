@@ -19,6 +19,7 @@ public class Parser {
         List<Ast.ModuleTypeDecl> moduleTypes = new ArrayList<>();
         List<Ast.ModuleDecl> modules = new ArrayList<>();
         List<Ast.FunctorDecl> functors = new ArrayList<>();
+        List<Ast.FunctorTypeDecl> functorTypes = new ArrayList<>();
         List<String> imports = new ArrayList<>();
         List<Ast.Stmt> mainBody = null;
 
@@ -41,6 +42,8 @@ public class Parser {
                 moduleTypes.add(parseModuleType());
             } else if (matchIdent("module")) {
                 modules.add(parseModule());
+            } else if (matchIdent("functor_type")) {
+                functorTypes.add(parseFunctorType());
             } else if (matchIdent("functor")) {
                 functors.add(parseFunctor(false));
             } else if (matchIdent("functor_gen")) {
@@ -60,7 +63,7 @@ public class Parser {
         // 'main' is required for the entry file; imported files may omit it.
         // That check is enforced at run time (Interpreter.run).
         return new Ast.Program(imports, fns, enums, interfaces, classes, models,
-                               moduleTypes, modules, functors, mainBody);
+                               moduleTypes, modules, functors, functorTypes, mainBody);
     }
 
     private Ast.FnDecl parseFnDecl() {
@@ -160,7 +163,22 @@ public class Parser {
         expect(Type.COLON);
         String signature = expect(Type.IDENT).text;
         ModuleMembers members = parseModuleMethods();
+        if (members.returnedFunctor != null)
+            throw err("module may not return a functor");
         return new Ast.ModuleDecl(name, signature, members.methods, members.typeAliases);
+    }
+
+    // functor_type FACTORY(INPUT) -> OUTPUT
+    private Ast.FunctorTypeDecl parseFunctorType() {
+        String name = expect(Type.IDENT).text;
+        expect(Type.LPAREN);
+        String input = expect(Type.IDENT).text;
+        expect(Type.RPAREN);
+        expect(Type.MINUS);
+        expect(Type.GT);
+        String output = expect(Type.IDENT).text;
+        expect(Type.NEWLINE);
+        return new Ast.FunctorTypeDecl(name, input, output);
     }
 
     // functor Make(Dependency: INPUT) -> OUTPUT:
@@ -187,7 +205,8 @@ public class Parser {
         expect(Type.COLON);
         ModuleMembers members = parseModuleMethods();
         return new Ast.FunctorDecl(name, argument, input, output,
-                                   members.methods, members.typeAliases, generative, sharing);
+                                   members.methods, members.typeAliases, generative,
+                                   sharing, members.returnedFunctor);
     }
 
     private String parseTypePath() {
@@ -196,13 +215,15 @@ public class Parser {
         return name;
     }
 
-    private record ModuleMembers(List<Ast.MethodDecl> methods, Map<String, String> typeAliases) {}
+    private record ModuleMembers(List<Ast.MethodDecl> methods, Map<String, String> typeAliases,
+                                 String returnedFunctor) {}
 
     private ModuleMembers parseModuleMethods() {
         expect(Type.NEWLINE);
         expect(Type.INDENT);
         List<Ast.MethodDecl> methods = new ArrayList<>();
         Map<String, String> typeAliases = new LinkedHashMap<>();
+        String returnedFunctor = null;
         while (!check(Type.DEDENT) && !check(Type.EOF)) {
             if (check(Type.NEWLINE)) { p++; continue; }
             if (matchIdent("type")) {
@@ -215,12 +236,17 @@ public class Parser {
                 }
             } else if (matchIdent("fn")) {
                 methods.add(parseMethod());
+            } else if (matchIdent("return_functor")) {
+                if (returnedFunctor != null) throw err("duplicate return_functor");
+                expect(Type.COLON);
+                returnedFunctor = expect(Type.IDENT).text;
+                expect(Type.NEWLINE);
             } else {
-                throw err("module body expects 'type' or 'fn' declarations");
+                throw err("module body expects 'type', 'fn' or 'return_functor' declarations");
             }
         }
         expect(Type.DEDENT);
-        return new ModuleMembers(methods, typeAliases);
+        return new ModuleMembers(methods, typeAliases, returnedFunctor);
     }
 
     // class Name[(Super, Iface...)]:

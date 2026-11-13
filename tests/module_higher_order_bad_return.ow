@@ -1,0 +1,14 @@
+module_type SOURCE:
+  fn get() -> int
+module_type RESULT:
+  fn result() -> int
+module_type OTHER:
+  fn different() -> int
+functor_type MAKER(SOURCE) -> RESULT
+functor Wrong(S: SOURCE) -> OTHER:
+  fn different() -> int:
+    return: 1
+functor Bad(F: MAKER) -> MAKER:
+  return_functor: Wrong
+main:
+  print: "should not run"

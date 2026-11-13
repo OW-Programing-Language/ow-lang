@@ -99,3 +99,30 @@ See [dependent_result.ow](../examples/module_calculus/dependent_result.ow).
 
 This implements **first-order dependent result sharing**, not the full OCaml
 `with type` constraint language or static path-dependent type inference.
+
+## Higher-order functors
+
+A `functor_type` declares a public signature for a functor, including its input
+and output module signatures:
+
+```ow
+functor_type MAKER(SOURCE) -> RESULT
+
+functor Decorate(F: MAKER) -> RESULT:
+  fn result() -> int:
+    set created: F(Source)
+    return: created.result() + 1
+
+functor Identity(F: MAKER) -> MAKER:
+  return_functor: F
+```
+
+Functors are now first-class values: a functor can accept a compatible functor
+as an argument, invoke it inside a module export, and return a compatible
+functor that can be applied again. The checker rejects incompatible return
+signatures before `main`; applications validate functor signatures as well.
+See [higher_order.ow](../examples/module_calculus/higher_order.ow).
+
+This is first-class higher-order composition. It is not complete OCaml
+polymorphic higher-order module inference, and the runtime still evaluates
+functor applications rather than compiling module types away.
