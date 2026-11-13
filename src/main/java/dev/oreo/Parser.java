@@ -207,7 +207,7 @@ public class Parser {
         if (members.returnedFunctor != null)
             throw err("module may not return a functor");
         return new Ast.ModuleDecl(name, signature, members.methods, members.typeAliases,
-                                  sharing, Ast.SourceSpan.from(nameToken));
+                                  sharing, members.includes, Ast.SourceSpan.from(nameToken));
     }
 
     // functor_type FACTORY(INPUT) -> OUTPUT
@@ -249,7 +249,7 @@ public class Parser {
         ModuleMembers members = parseModuleMethods();
         return new Ast.FunctorDecl(name, argument, input, output,
                                    members.methods, members.typeAliases, generative,
-                                   sharing, members.returnedFunctor,
+                                   sharing, members.returnedFunctor, members.includes,
                                    Ast.SourceSpan.from(nameToken));
     }
 
@@ -266,17 +266,21 @@ public class Parser {
     }
 
     private record ModuleMembers(List<Ast.MethodDecl> methods, Map<String, String> typeAliases,
-                                 String returnedFunctor) {}
+                                 List<String> includes, String returnedFunctor) {}
 
     private ModuleMembers parseModuleMethods() {
         expect(Type.NEWLINE);
         expect(Type.INDENT);
         List<Ast.MethodDecl> methods = new ArrayList<>();
         Map<String, String> typeAliases = new LinkedHashMap<>();
+        List<String> includes = new ArrayList<>();
         String returnedFunctor = null;
         while (!check(Type.DEDENT) && !check(Type.EOF)) {
             if (check(Type.NEWLINE)) { p++; continue; }
-            if (matchIdent("type")) {
+            if (matchIdent("include")) {
+                includes.add(parseQualifiedModuleName());
+                expect(Type.NEWLINE);
+            } else if (matchIdent("type")) {
                 String name = expect(Type.IDENT).text;
                 expect(Type.COLON);
                 String representation = parseTypePath();
@@ -292,11 +296,11 @@ public class Parser {
                 returnedFunctor = expect(Type.IDENT).text;
                 expect(Type.NEWLINE);
             } else {
-                throw err("module body expects 'type', 'fn' or 'return_functor' declarations");
+                throw err("module body expects 'include', 'type', 'fn' or 'return_functor' declarations");
             }
         }
         expect(Type.DEDENT);
-        return new ModuleMembers(methods, typeAliases, returnedFunctor);
+        return new ModuleMembers(methods, typeAliases, includes, returnedFunctor);
     }
 
     // class Name[(Super, Iface...)]:

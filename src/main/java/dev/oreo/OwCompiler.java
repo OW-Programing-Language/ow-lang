@@ -23,7 +23,7 @@ public class OwCompiler {
     public void compileToExe(Path inputOw, Path outputExe) throws Exception {
         // Parse all imported files and validate module signatures at build time.
         // This never executes main or invokes the target toolchain.
-        Ast.Program program = Loader.load(inputOw);
+        Ast.Program program = ModuleImplementationExpander.expand(Loader.load(inputOw));
         ModuleTypeChecker.check(program);
 
         // The current LLVM backend does not lower first-class module values.

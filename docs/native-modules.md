@@ -277,3 +277,30 @@ Known pack/unpack operations with literal signatures are validated by
 Unlike full OCaml `(module M : S)` existential semantics, module packages
 are not yet accompanied by universal static type inference across
 heterogeneous containers or LLVM native lowering.
+
+## Include module implementations
+
+`include Warehouse` inside a `module` or `functor` body now imports
+the source's **public signature exports** as delegates to the original
+module, rather than duplicating its code or private representation.
+
+```ow
+module Inventory: STOCK
+  include Warehouse
+  fn available(x token) -> int:
+    return: 1
+```
+
+The checker detects cycles, unknown included modules, conflicting inherited
+exports and accidental abstract-type representation redefinition. Local
+methods can override inherited implementations, and a functor may
+`include` its typed module parameter.
+
+Abstract types inherited via implementation `include` share the **source**
+module's identity through a type path (`Warehouse.token`); this is
+intentional to avoid inventing an unrelated generative identity.
+
+This supports a statically resolvable module path or functor argument.
+It does not yet reproduce OCaml's full `include struct ... end`,
+arbitrary local structures, recursive module equations or compiler-managed
+first-class module inference.

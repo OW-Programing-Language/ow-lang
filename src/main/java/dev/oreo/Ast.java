@@ -154,6 +154,7 @@ public class Ast {
         public final List<MethodDecl> methods;
         public final Map<String, String> typeAliases;
         public final Map<String, String> typeSharing;
+        public final List<String> includes;
         public final SourceSpan span;
         public ModuleDecl(String name, String signature, List<MethodDecl> methods) {
             this(name, signature, methods, Map.of(), Map.of());
@@ -169,11 +170,17 @@ public class Ast {
         public ModuleDecl(String name, String signature, List<MethodDecl> methods,
                           Map<String, String> typeAliases, Map<String, String> typeSharing,
                           SourceSpan span) {
+            this(name, signature, methods, typeAliases, typeSharing, List.of(), span);
+        }
+        public ModuleDecl(String name, String signature, List<MethodDecl> methods,
+                          Map<String, String> typeAliases, Map<String, String> typeSharing,
+                          List<String> includes, SourceSpan span) {
             this.name = name;
             this.signature = signature;
             this.methods = methods;
             this.typeAliases = typeAliases;
             this.typeSharing = typeSharing;
+            this.includes = includes;
             this.span = span;
         }
     }
@@ -207,6 +214,7 @@ public class Ast {
         public final boolean generative;
         public final Map<String, String> typeSharing;
         public final String returnedFunctor;
+        public final List<String> includes;
         public final SourceSpan span;
         public FunctorDecl(String name, String argument, String inputSignature,
                            String outputSignature, List<MethodDecl> methods) {
@@ -241,6 +249,15 @@ public class Ast {
                            String outputSignature, List<MethodDecl> methods,
                            Map<String, String> typeAliases, boolean generative,
                            Map<String, String> typeSharing, String returnedFunctor, SourceSpan span) {
+            this(name, argument, inputSignature, outputSignature, methods, typeAliases,
+                 generative, typeSharing, returnedFunctor, List.of(), span);
+        }
+        public FunctorDecl(String name, String argument, String inputSignature,
+                           String outputSignature, List<MethodDecl> methods,
+                           Map<String, String> typeAliases, boolean generative,
+                           Map<String, String> typeSharing, String returnedFunctor,
+                           List<String> includes, SourceSpan span) {
+            this.includes = includes;
             this.name = name;
             this.argument = argument;
             this.inputSignature = inputSignature;

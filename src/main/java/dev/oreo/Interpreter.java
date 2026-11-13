@@ -198,6 +198,7 @@ public class Interpreter {
         }
         // Module signatures are checked before any user code is executed.
         // This is a load-time semantic check, not a general static type checker.
+        program = ModuleImplementationExpander.expand(program);
         ModuleTypeChecker.check(program);
         moduleTypes.putAll(ModuleTypeChecker.signatures(program));
         functorTypes.putAll(ModuleTypeChecker.functorSignatures(program));
