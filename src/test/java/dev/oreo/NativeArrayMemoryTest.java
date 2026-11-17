@@ -63,7 +63,7 @@ public class NativeArrayMemoryTest {
     @Test public void newArraySlotsStartAsNullEvenInConditionalBlocks() {
         String llvm = ir("""
                 main:
-                  if false:
+                  if: false
                     set never: [9]
                   print: 10
                 """);
