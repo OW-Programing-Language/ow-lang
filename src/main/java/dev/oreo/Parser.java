@@ -99,14 +99,11 @@ public class Parser {
 
     private Ast.FnDecl parseFnDecl(List<String> annotations) {
         String name = expect(Type.IDENT).text;
-        // Reuse the method-signature syntax for top-level functions:
-        // fn identity(values array) -> array:
-        // Legacy untyped fn name(a, b): syntax continues to parse unchanged.
         ParamSpec params = parseTypedParamList();
-        String returnType = parseReturnType();
-        List<Ast.Stmt> body = parseBlockHeaderless();
-        return new Ast.FnDecl(name, params.names, body, annotations,
-                              params.types, returnType);
+        String legacyReturnType = parseReturnType();
+        FunctionBody body = parseFunctionBody(legacyReturnType);
+        return new Ast.FnDecl(name, params.names, body.statements(), annotations,
+                              params.types, body.returnType());
     }
 
     // enum Name:
@@ -402,16 +399,19 @@ public class Parser {
         boolean isPrivate = parseVisibility();
         Lexer.Token nameToken = expect(Type.IDENT);
         ParamSpec params = parseTypedParamList();
-        String returnType = parseReturnType();
-        List<Ast.Stmt> body = parseBlockHeaderless();
+        String legacyReturnType = parseReturnType();
+        FunctionBody body = parseFunctionBody(legacyReturnType);
         return new Ast.MethodDecl(nameToken.text, isPrivate, params.names, params.types,
-                                  returnType, body, Ast.SourceSpan.from(nameToken), annotations);
+                                  body.returnType(), body.statements(),
+                                  Ast.SourceSpan.from(nameToken), annotations);
     }
 
     private record ParamSpec(List<String> names, List<String> types) {}
+    private record FunctionBody(String returnType, List<Ast.Stmt> statements) {}
 
-    // OW method parameters support optional type annotations:
-    //   fn reserve(quantity int) -> bool
+    // Preferred YAML-style parameter types: fn add(a: int, b: int):
+    // Legacy `fn add(a int, b int):` and untyped parameters stay valid.
+    // Shared by functions, class/module methods, interfaces and module types.
     private ParamSpec parseTypedParamList() {
         expect(Type.LPAREN);
         List<String> names = new ArrayList<>();
@@ -419,19 +419,56 @@ public class Parser {
         if (!check(Type.RPAREN)) {
             do {
                 names.add(expect(Type.IDENT).text);
-                types.add(check(Type.IDENT) ? expect(Type.IDENT).text : null);
+                String type = null;
+                if (match(Type.COLON)) {
+                    type = expect(Type.IDENT).text;
+                } else if (check(Type.IDENT)) {
+                    type = expect(Type.IDENT).text;
+                }
+                types.add(type);
             } while (match(Type.COMMA));
         }
         expect(Type.RPAREN);
         return new ParamSpec(names, types);
     }
 
+    // Retain the old arrow notation for backwards compatibility.
     private String parseReturnType() {
         if (match(Type.MINUS)) {
             expect(Type.GT);
             return expect(Type.IDENT).text;
         }
         return null;
+    }
+
+    /**
+     * Function and method bodies may begin with one YAML-style return type:
+     *
+     * fn greet(name: string):
+     *   returns: string
+     *   return: "Hello " + name
+     *
+     * The `returns:` declaration is metadata, not an executable statement.
+     * It must be first and cannot be combined with the old `-> type` header.
+     * Other statement blocks keep using parseBlockHeaderless().
+     */
+    private FunctionBody parseFunctionBody(String legacyReturnType) {
+        expect(Type.COLON);
+        expect(Type.NEWLINE);
+        expect(Type.INDENT);
+        while (check(Type.NEWLINE)) p++;
+        String returnType = legacyReturnType;
+        if (matchIdent("returns")) {
+            if (legacyReturnType != null) {
+                throw err("Return type cannot be declared with both '->' and 'returns:'");
+            }
+            expect(Type.COLON);
+            returnType = expect(Type.IDENT).text;
+            expect(Type.NEWLINE);
+        }
+        List<Ast.Stmt> statements = parseStmtsUntilDedent();
+        expect(Type.DEDENT);
+        return new FunctionBody(returnType, statements);
     }
 
     // model Name:
