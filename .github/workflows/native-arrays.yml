@@ -5,6 +5,7 @@ on:
     paths:
       - 'src/**'
       - 'examples/native_arrays*.ow'
+      - 'examples/native_dynamic_arrays*.ow'
       - 'docs/native-arrays.md'
       - '.github/workflows/native-arrays.yml'
       - 'pom.xml'
@@ -33,6 +34,30 @@ jobs:
           diff -u target/interpreted.txt target/native.txt
           printf '3\n20\n99\n0\n' > target/expected.txt
           diff -u target/expected.txt target/native.txt
+      - name: Compile runtime-sized arrays and compare native/interpreter output
+        run: |
+          java -jar target/OwIDE.jar llvm examples/native_dynamic_arrays.ow target/native-dynamic-arrays.ll
+          clang target/native-dynamic-arrays.ll -o target/native-dynamic-arrays
+          java -jar target/OwIDE.jar run examples/native_dynamic_arrays.ow > target/dynamic-interpreted.txt
+          ./target/native-dynamic-arrays > target/dynamic-native.txt
+          diff -u target/dynamic-interpreted.txt target/dynamic-native.txt
+          printf '4\n6\n42\n0\n' > target/dynamic-expected.txt
+          diff -u target/dynamic-expected.txt target/dynamic-native.txt
+      - name: Reject negative runtime-sized array lengths
+        shell: bash
+        run: |
+          ulimit -c 0
+          java -jar target/OwIDE.jar llvm examples/native_dynamic_arrays_negative.ow target/native-dynamic-negative.ll
+          clang target/native-dynamic-negative.ll -o target/native-dynamic-negative
+          set +e
+          ./target/native-dynamic-negative >/dev/null 2>&1
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "ERROR: negative dynamic array length was accepted"
+            exit 1
+          fi
+          echo "Negative array length rejected with exit code $status"
       - name: Out-of-range native accesses must fail
         shell: bash
         run: |

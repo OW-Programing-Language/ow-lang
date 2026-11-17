@@ -1,4 +1,4 @@
-# Native LLVM arrays: initial milestone
+# Native LLVM integer arrays: literals and runtime-sized arrays
 
 The LLVM backend now lowers **integer-array literals** using a two-field
 `%ow.array` header: a 32-bit length and a pointer to shared heap backing
@@ -7,6 +7,9 @@ memory-managed array implementation**.
 
 Supported natively:
 - `set items: [1, 2, 3]` and `set empty: []`
+- `array(size, fill)` where `size` and `fill` evaluate to 32-bit integers.
+  The size may be calculated at runtime, and `fill` is evaluated exactly once.
+  Negative sizes fail before evaluating the fill value.
 - `len(items)` with one integer-array argument
 - `items[index]` and `set items[index]: value`
 - Copying array variables aliases the shared storage, matching the interpreter
@@ -32,12 +35,32 @@ clang native-arrays.ll -o native-arrays
 ./native-arrays
 ```
 
+### Runtime-sized array example
+
+```ow
+main:
+  set size: 2 + 2
+  set items: array(size, 7)
+  print: len(items)
+  print: items[0]
+```
+
+```sh
+ow run examples/native_dynamic_arrays.ow
+ow llvm examples/native_dynamic_arrays.ow target/native-dynamic-arrays.ll
+clang target/native-dynamic-arrays.ll -o target/native-dynamic-arrays
+./target/native-dynamic-arrays
+```
+
+The native code checks for negative array lengths and failed allocations
+before accessing memory. Runtime-sized arrays use a generated loop that
+fills each 32-bit element and allocates at least one slot for empty arrays.
+
 ### Current limitations and future work
 
 - Arrays are restricted to **32-bit integer elements**. Mixed arrays,
   strings, nested arrays, and dictionaries are not supported by this lowering.
-- `array(count, fill)` and passing/returning arrays across functions are
-  not yet supported in native mode.
+- Passing and returning arrays across functions are not yet supported in native mode.
 - **Native array allocations are not reclaimed yet.** This milestone
   deliberately uses `calloc` with shared mutable backing storage, but
   a proper native ownership/GC strategy is still required before long-running
@@ -46,6 +69,6 @@ clang native-arrays.ll -o native-arrays
   native exception integration is a separate milestone.
 - The interpreter remains the reference implementation for full OW semantics.
 
-The integration workflow compiles the same sample using both the JVM
+The integration workflow compiles both array examples using the JVM
 interpreter and LLVM/Clang and compares their outputs. Out-of-range indexing
-is separately checked for a nonzero native exit status.
+and negative dynamic sizes are separately checked for nonzero native exit status.
