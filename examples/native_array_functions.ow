@@ -1,0 +1,53 @@
+# Native LLVM array parameter/return ownership and aliasing.
+fn peek(values array) -> int:
+  print: len(values)
+  return: values[1]
+
+fn change(values array) -> int:
+  set values[0]: 77
+  return: 0
+
+fn mirror(values array) -> array:
+  return: values
+
+fn make(size int, fill int) -> array:
+  return: array(size, fill)
+
+fn replace(source array) -> array:
+  set local: source
+  set source: [88, 89]
+  return: local
+
+fn echo(items array) -> array:
+  return: mirror(items)
+
+fn local() -> int:
+  set storage: make(2, 10)
+  print: storage[0]
+  return: len(storage)
+
+main:
+  set root: make(3, 5)
+  print: peek(root)
+  call: change(root)
+  print: root[0]
+
+  set returned: mirror(root)
+  set root: [1, 2]
+  print: returned[0]
+
+  set acquired: make(2, 17)
+  print: len(acquired)
+
+  set borrowed: replace(returned)
+  print: borrowed[0]
+  print: returned[0]
+
+  set chain: echo(make(2, 8))
+  print: chain[1]
+  print: make(2, 9)[1]
+  print: len(make(0, 3))
+  call: change(make(1, 10))
+  call: make(2, 11)
+
+  print: local()
