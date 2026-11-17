@@ -1,0 +1,5 @@
+# Negative lengths are rejected in interpreted and native OW.
+main:
+  set count: -1
+  set values: array(count, 0)
+  print: len(values)
