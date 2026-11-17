@@ -38,6 +38,11 @@ public class Main {
                     }
                     filter = args[3];
                 }
+                if (filter != null && Files.isDirectory(target)) {
+                    System.err.println("--filter requires a test file, not a directory");
+                    System.exit(2);
+                    return;
+                }
                 List<Path> tests = new ArrayList<>();
                 if (Files.isDirectory(target)) {
                     try (Stream<Path> walk = Files.walk(target)) {
