@@ -17,6 +17,15 @@ public final class Loader {
     private Loader() {}
 
     public static Ast.Program load(Path entry) throws IOException {
+        return loadEntry(entry, false);
+    }
+
+    /** OW test files may omit main: and define only annotated tests. */
+    public static Ast.Program loadTests(Path entry) throws IOException {
+        return loadEntry(entry, true);
+    }
+
+    private static Ast.Program loadEntry(Path entry, boolean allowMissingMain) throws IOException {
         Path root = entry.toAbsolutePath().normalize();
         Map<String, Path> aliases = DependencyManager.forEntry(root);
 
@@ -35,7 +44,7 @@ public final class Loader {
         Deque<Path> active = new ArrayDeque<>();
         List<Ast.Stmt> mainBody = collect(root, visited, fns, enums, interfaces, classes, models, moduleTypes, modules, functors, functorTypes, moduleAliases, active, true, aliases);
 
-        if (mainBody == null) {
+        if (mainBody == null && !allowMissingMain) {
             throw new RuntimeException("Program is missing a 'main:' block (entry file: " + root + ")");
         }
         return new Ast.Program(List.of(), fns, enums, interfaces, classes, models,
