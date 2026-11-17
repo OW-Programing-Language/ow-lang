@@ -1,0 +1,50 @@
+name: OW native integer array compilation
+
+on:
+  push:
+    paths:
+      - 'src/**'
+      - 'examples/native_arrays*.ow'
+      - 'docs/native-arrays.md'
+      - '.github/workflows/native-arrays.yml'
+      - 'pom.xml'
+  pull_request:
+
+jobs:
+  native-arrays:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: Build and run Java regression tests
+        run: mvn -B clean package
+      - name: Build the sample using the native OW compiler
+        run: |
+          java -jar target/OwIDE.jar llvm examples/native_arrays.ow target/native-arrays.ll
+          clang target/native-arrays.ll -o target/native-arrays
+      - name: Check interpreter/native output parity
+        run: |
+          java -jar target/OwIDE.jar run examples/native_arrays.ow > target/interpreted.txt
+          ./target/native-arrays > target/native.txt
+          diff -u target/interpreted.txt target/native.txt
+          printf 'Expected output:\n3\n20\n99\n0\n' > target/expected.txt
+          diff -u target/expected.txt target/native.txt
+      - name: Out-of-range native accesses must fail
+        shell: bash
+        run: |
+          ulimit -c 0
+          java -jar target/OwIDE.jar llvm examples/native_arrays_oob.ow target/native-arrays-oob.ll
+          clang target/native-arrays-oob.ll -o target/native-arrays-oob
+          set +e
+          ./target/native-arrays-oob >/dev/null 2>&1
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "ERROR: native invalid array index succeeded unexpectedly"
+            exit 1
+          fi
+          echo "Bounds check rejected invalid access with exit code $status"
