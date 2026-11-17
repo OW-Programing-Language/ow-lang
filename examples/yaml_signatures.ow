@@ -1,0 +1,18 @@
+# Preferred OW function signatures: YAML-like, no arrow required.
+fn greet(name: string):
+  returns: string
+  return: "Hello " + name
+
+fn make(size: int, fill: int):
+  returns: array
+  return: array(size, fill)
+
+fn sum(a: int, b: int):
+  returns: int
+  return: a + b
+
+main:
+  print: greet("OW")
+  print: sum(20, 22)
+  set values: make(3, 7)
+  print: values[1]
