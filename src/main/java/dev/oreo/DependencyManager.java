@@ -74,7 +74,8 @@ public final class DependencyManager {
     static Manifest parse(Path manifestFile) throws IOException {
         Object object = loadYaml(manifestFile);
         Map<?, ?> root = asMap(object, "dependencies.yml");
-        int format = Integer.parseInt(String.valueOf(root.getOrDefault("format", 1)));
+        Object formatValue = root.containsKey("format") ? root.get("format") : 1;
+        int format = Integer.parseInt(String.valueOf(formatValue));
         if (format != 1) throw new IllegalArgumentException("Unsupported dependencies.yml format: " + format);
 
         List<Repository> repositories = new ArrayList<>();
@@ -318,6 +319,7 @@ public final class DependencyManager {
             content.append("    commit: ").append(yamlString(d.commit())).append("\n");
         }
         Path dest = root.resolve("dependencies.lock.yml");
+        if (Files.isRegularFile(dest) && content.toString().equals(Files.readString(dest))) return;
         Path tmp = Files.createTempFile(root, ".ow-lock-", ".yml");
         try {
             Files.writeString(tmp, content, StandardCharsets.UTF_8);
