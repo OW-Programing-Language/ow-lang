@@ -38,7 +38,7 @@ public class LlvmIrGen {
         functionNames.clear();
         functionSignatures.clear();
         for (Ast.FnDecl fn : program.functions) {
-            if (fn.name.startsWith("__ow_native_array_")) {
+            if (fn.name.startsWith("__ow_native_array_") || fn.name.startsWith("__ow_native_string_")) {
                 throw new RuntimeException("LLVM backend: reserved native runtime function name: " + fn.name);
             }
             if (!functionNames.add(fn.name)) {
