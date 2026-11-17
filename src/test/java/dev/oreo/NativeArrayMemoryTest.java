@@ -68,7 +68,7 @@ public class NativeArrayMemoryTest {
                   print: 10
                 """);
         int entrySlot = llvm.indexOf("%never = alloca %ow.array");
-        int branch = llvm.indexOf("br i1");
+        int branch = llvm.indexOf("br i1", llvm.indexOf("define i32 @main()"));
         assertTrue(entrySlot > 0);
         assertTrue(branch > entrySlot);
         assertTrue(llvm.contains("store %ow.array zeroinitializer, %ow.array* %never"));
