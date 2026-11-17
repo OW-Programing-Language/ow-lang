@@ -7,6 +7,8 @@ on:
       - 'examples/native_arrays*.ow'
       - 'examples/native_dynamic_arrays*.ow'
       - 'examples/native_array_memory.ow'
+      - 'examples/native_array_functions.ow'
+      - 'docs/native-array-functions.md'
       - 'docs/native-array-memory.md'
       - 'docs/native-arrays.md'
       - '.github/workflows/native-arrays.yml'
@@ -69,6 +71,15 @@ jobs:
           diff -u target/memory-interpreted.txt target/memory-native.txt
           printf '5\n7\n3\n4\n11\n19\n19\n8\n11\n0\n' > target/memory-expected.txt
           diff -u target/memory-expected.txt target/memory-native.txt
+      - name: Check array arguments and return values with native ASan
+        run: |
+          java -jar target/OwIDE.jar llvm examples/native_array_functions.ow target/native-array-functions.ll
+          clang -O0 -g -fsanitize=address -fno-omit-frame-pointer target/native-array-functions.ll -o target/native-array-functions-asan
+          java -jar target/OwIDE.jar run examples/native_array_functions.ow > target/functions-interpreted.txt
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 ./target/native-array-functions-asan > target/functions-native.txt
+          diff -u target/functions-interpreted.txt target/functions-native.txt
+          printf '3\n5\n77\n77\n2\n77\n77\n8\n9\n0\n10\n2\n' > target/functions-expected.txt
+          diff -u target/functions-expected.txt target/functions-native.txt
       - name: Out-of-range native accesses must fail
         shell: bash
         run: |
