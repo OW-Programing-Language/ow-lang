@@ -40,6 +40,11 @@ public class LlvmIrGen {
         StringBuilder out = new StringBuilder();
         out.append("; ModuleID = '").append(moduleName).append("'\n");
         out.append("declare i32 @printf(i8*, ...)\n");
+        // The first native collection representation: a value-semantic header
+        // with a shared heap backing store (OW array aliases stay aliases).
+        out.append("%ow.array = type { i32, i32* }\n");
+        out.append("declare i8* @calloc(i64, i64)\n");
+        out.append("declare void @abort() noreturn\n");
         out.append("@.fmt_int = private constant [4 x i8] c\"%d\\0A\\00\"\n");
         out.append("@.fmt_str = private constant [4 x i8] c\"%s\\0A\\00\"\n");
         out.append(globals);
@@ -116,8 +121,18 @@ public class LlvmIrGen {
             return;
         }
 
-        if (st instanceof Ast.SetIndexStmt) {
-            throw new RuntimeException("LLVM backend: array mutation is not supported yet");
+        if (st instanceof Ast.SetIndexStmt set) {
+            // OW evaluates the array and index before the assigned value.
+            Value array = genExpr(new Ast.Var(set.name));
+            Value index = genExpr(set.index);
+            String elementPtr = checkedArrayElement(array, index);
+            Value value = genExpr(set.value);
+            if (!value.type.equals("i32")) {
+                throw new RuntimeException("LLVM backend: native arrays currently store only integers");
+            }
+            body.append("  store i32 ").append(value.ref).append(", i32* ")
+                    .append(elementPtr).append("\n");
+            return;
         }
 
         if (st instanceof Ast.PrintStmt p) {
@@ -219,8 +234,25 @@ public class LlvmIrGen {
         if (e instanceof Ast.BoolLit b) {
             return new Value(b.value ? "1" : "0", "i32");
         }
-        if (e instanceof Ast.ArrayLit) {
-            throw new RuntimeException("LLVM backend: arrays are not supported yet");
+        if (e instanceof Ast.ArrayLit a) {
+            // Array contents are heap-backed, so "set alias: original" shares
+            // mutations as in OW's interpreter (copying the two-field header).
+            // A future native runtime will own reclamation; LLVM does not
+            // currently lower arrays across function boundaries.
+            int count = a.elements.size();
+            Value storage = allocatedArrayData(Integer.toString(count), Integer.toString(count));
+            for (int i = 0; i < count; i++) {
+                Value element = genExpr(a.elements.get(i));
+                if (!element.type.equals("i32")) {
+                    throw new RuntimeException("LLVM backend: native arrays currently store only integers");
+                }
+                String item = newTemp();
+                body.append("  ").append(item).append(" = getelementptr i32, i32* ")
+                        .append(storage.ref).append(", i32 ").append(i).append("\n");
+                body.append("  store i32 ").append(element.ref)
+                        .append(", i32* ").append(item).append("\n");
+            }
+            return buildArrayValue(Integer.toString(count), storage.ref);
         }
         if (e instanceof Ast.Var v) {
             String ptr = locals.get(v.name);
@@ -231,8 +263,14 @@ public class LlvmIrGen {
                     .append(", ").append(type).append("* ").append(ptr).append("\n");
             return new Value(t, type);
         }
-        if (e instanceof Ast.IndexExpr) {
-            throw new RuntimeException("LLVM backend: array indexing is not supported yet");
+        if (e instanceof Ast.IndexExpr idx) {
+            Value target = genExpr(idx.target);
+            Value index = genExpr(idx.index);
+            String ptr = checkedArrayElement(target, index);
+            String result = newTemp();
+            body.append("  ").append(result).append(" = load i32, i32* ")
+                    .append(ptr).append("\n");
+            return new Value(result, "i32");
         }
         if (e instanceof Ast.BinOp b) {
             Value l = genExpr(b.left);
@@ -273,8 +311,19 @@ public class LlvmIrGen {
             return new Value(t, "i1");
         }
         if (e instanceof Ast.CallExpr call) {
+            if (call.name.equals("len")) {
+                if (call.args.size() != 1)
+                    throw new RuntimeException("LLVM backend: len expects one argument");
+                Value array = genExpr(call.args.get(0));
+                if (!array.type.equals("%ow.array"))
+                    throw new RuntimeException("LLVM backend: len currently supports only integer arrays");
+                String length = newTemp();
+                body.append("  ").append(length).append(" = extractvalue %ow.array ")
+                        .append(array.ref).append(", 0\n");
+                return new Value(length, "i32");
+            }
             if (call.name.equals("input") || call.name.equals("int")
-                    || call.name.equals("len") || call.name.equals("array")) {
+                    || call.name.equals("array")) {
                 throw new RuntimeException("LLVM backend: builtin '" + call.name + "' is not supported yet");
             }
             if (!functionNames.contains(call.name)) {
@@ -295,6 +344,81 @@ public class LlvmIrGen {
             return new Value(t, "i32");
         }
         throw new RuntimeException("Unknown expr: " + e.getClass());
+    }
+
+    /** Allocate zero-initialized storage for a native integer array.
+     * calloc receives an element count and a four-byte element size. Even
+     * empty arrays allocate one element to avoid implementation-defined
+     * calloc(0,4) behavior. Allocation failure terminates rather than
+     * performing a null dereference.
+     */
+    private Value allocatedArrayData(String count, String allocationCount) {
+        String raw = newTemp();
+        body.append("  ").append(raw).append(" = call i8* @calloc(i64 ")
+                .append(allocationCount.equals("0") ? "1" : allocationCount)
+                .append(", i64 4)\n");
+        String ok = newTemp();
+        body.append("  ").append(ok).append(" = icmp ne i8* ").append(raw).append(", null\n");
+        int id = labelId++;
+        String alive = "array.alloc.ok." + id;
+        String failure = "array.alloc.fail." + id;
+        body.append("  br i1 ").append(ok).append(", label %")
+                .append(alive).append(", label %").append(failure).append("\n");
+        body.append(failure).append(":\n");
+        body.append("  call void @abort()\n");
+        body.append("  unreachable\n");
+        body.append(alive).append(":\n");
+        String data = newTemp();
+        body.append("  ").append(data).append(" = bitcast i8* ")
+                .append(raw).append(" to i32*\n");
+        return new Value(data, "i32*");
+    }
+
+    private Value buildArrayValue(String length, String data) {
+        String header = newTemp();
+        body.append("  ").append(header)
+                .append(" = insertvalue %ow.array undef, i32 ")
+                .append(length).append(", 0\n");
+        String joined = newTemp();
+        body.append("  ").append(joined)
+                .append(" = insertvalue %ow.array ").append(header)
+                .append(", i32* ").append(data).append(", 1\n");
+        return new Value(joined, "%ow.array");
+    }
+
+    private String checkedArrayElement(Value array, Value index) {
+        if (!array.type.equals("%ow.array"))
+            throw new RuntimeException("LLVM backend: indexing requires an integer array");
+        if (!index.type.equals("i32"))
+            throw new RuntimeException("LLVM backend: array indices must be integers");
+        String size = newTemp();
+        body.append("  ").append(size).append(" = extractvalue %ow.array ")
+                .append(array.ref).append(", 0\n");
+        String nonNegative = newTemp();
+        body.append("  ").append(nonNegative).append(" = icmp sge i32 ")
+                .append(index.ref).append(", 0\n");
+        String belowLength = newTemp();
+        body.append("  ").append(belowLength).append(" = icmp slt i32 ")
+                .append(index.ref).append(", ").append(size).append("\n");
+        String valid = newTemp();
+        body.append("  ").append(valid).append(" = and i1 ")
+                .append(nonNegative).append(", ").append(belowLength).append("\n");
+        int id = labelId++;
+        String inside = "array.index.ok." + id;
+        String failure = "array.index.fail." + id;
+        body.append("  br i1 ").append(valid).append(", label %")
+                .append(inside).append(", label %").append(failure).append("\n");
+        body.append(failure).append(":\n");
+        body.append("  call void @abort()\n");
+        body.append("  unreachable\n");
+        body.append(inside).append(":\n");
+        String data = newTemp();
+        body.append("  ").append(data).append(" = extractvalue %ow.array ")
+                .append(array.ref).append(", 1\n");
+        String element = newTemp();
+        body.append("  ").append(element).append(" = getelementptr i32, i32* ")
+                .append(data).append(", i32 ").append(index.ref).append("\n");
+        return element;
     }
 
     private String emitStringLiteral(String s) {
