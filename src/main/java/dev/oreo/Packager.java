@@ -101,6 +101,7 @@ public final class Packager {
             }
         }
         Files.writeString(game.resolve("entry.txt"), entry.getFileName().toString());
+        DependencyManager.stageForPackage(entry, game);
         // Support both main.ow + assets/ and src/main.ow + ../assets/ layouts.
         Path project = srcDir.getFileName().toString().equals("src") ? srcDir.getParent() : srcDir;
         for (String folder : List.of("assets", "models")) {
