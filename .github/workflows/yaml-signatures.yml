@@ -1,0 +1,35 @@
+name: OW YAML-style function signatures
+
+on:
+  push:
+    paths:
+      - 'src/**'
+      - 'examples/yaml_signatures.ow'
+      - 'docs/yaml-function-syntax.md'
+      - '.github/workflows/yaml-signatures.yml'
+      - 'pom.xml'
+  pull_request:
+
+jobs:
+  yaml-signatures:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: Build OW compiler and run parser regressions
+        run: mvn -B clean package
+      - name: Generate LLVM IR from YAML-style source
+        run: |
+          java -jar target/OwIDE.jar llvm examples/yaml_signatures.ow target/yaml-signatures.ll
+          clang -O0 -g -fsanitize=address -fno-omit-frame-pointer target/yaml-signatures.ll -o target/yaml-signatures
+      - name: Compare OW interpreter and native executable
+        run: |
+          java -jar target/OwIDE.jar run examples/yaml_signatures.ow > target/yaml-interpreted.txt
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 ./target/yaml-signatures > target/yaml-native.txt
+          diff -u target/yaml-interpreted.txt target/yaml-native.txt
+          printf 'Hello OW\n42\n7\n' > target/yaml-expected.txt
+          diff -u target/yaml-expected.txt target/yaml-native.txt
