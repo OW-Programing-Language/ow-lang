@@ -6,6 +6,7 @@ top-level functions and class methods. Tests run using the interpreter:
 ```sh
 ow test tests/CalculatorTest.ow
 ow test tests/
+ow test tests/CalculatorTest.ow --filter CalculatorTest.addsNumbers
 ```
 
 For directory discovery, test files must end with `Test.ow` or `_test.ow`.
@@ -13,7 +14,9 @@ Test files need not contain `main:`, and `ow test` never executes the main
 block even if one exists. Class-method tests use one new object per test, so
 classes must have a zero-argument constructor. Setup and teardown methods run
 around every test. Results list individual pass/fail status and the process
-exits nonzero when any test fails or no tests are found.
+exits nonzero when any test fails or no tests are found. Use `--filter`
+to execute just one top-level function or one `ClassName.methodName`. An
+unknown test filter returns a failing status rather than silently succeeding.
 
 ```ow
 class CalculatorTest:
