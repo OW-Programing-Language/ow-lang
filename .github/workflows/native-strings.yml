@@ -1,0 +1,40 @@
+name: OW native immutable strings
+
+on:
+  push:
+    paths:
+      - 'src/**'
+      - 'examples/native_strings.ow'
+      - 'docs/native-strings.md'
+      - '.github/workflows/native-strings.yml'
+      - 'pom.xml'
+  pull_request:
+
+jobs:
+  native-strings:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: Build compiler and run all Java regressions
+        run: mvn -B clean package
+      - name: Compile OW strings to a native executable
+        run: |
+          java -jar target/OwIDE.jar llvm examples/native_strings.ow target/native-strings.ll
+          clang target/native-strings.ll -o target/native-strings
+      - name: Compare native output with OW interpreter
+        run: |
+          java -jar target/OwIDE.jar run examples/native_strings.ow > target/native-strings-interpreted.txt
+          ./target/native-strings > target/native-strings-native.txt
+          diff -u target/native-strings-interpreted.txt target/native-strings-native.txt
+          printf 'bonjour\n1\n0\n3\n4\n0\n42\n' > target/native-strings-expected.txt
+          diff -u target/native-strings-expected.txt target/native-strings-native.txt
+      - name: Detect native string runtime memory errors
+        run: |
+          clang -O0 -g -fsanitize=address -fno-omit-frame-pointer target/native-strings.ll -o target/native-strings-asan
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 ./target/native-strings-asan > target/native-strings-asan.txt
+          diff -u target/native-strings-native.txt target/native-strings-asan.txt
