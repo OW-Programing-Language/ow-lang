@@ -204,7 +204,7 @@ public class Interpreter {
         };
     }
 
-    public void run(Ast.Program program) {
+    private void loadProgram(Ast.Program program) {
         for (Ast.FnDecl fn : program.functions) {
             if (functions.containsKey(fn.name)) {
                 throw new RuntimeException("Duplicate function: " + fn.name);
@@ -294,11 +294,117 @@ public class Interpreter {
         // method with the required arity. Validate before running any main code.
         validateInterfaceImplementations();
         if (!models.isEmpty()) loadDb();
+    }
+
+    public void run(Ast.Program program) {
+        loadProgram(program);
         if (program.mainBody == null) {
             throw new RuntimeException("Program is missing a 'main:' block");
         }
         try {
             execBlock(program.mainBody, globals);
+        } finally {
+            if (ui != null) ui.shutdown();
+            for (RuntimeExtension extension : extensions) {
+                try { extension.close(); }
+                catch (Exception ex) {
+                    out.println("OW extension cleanup failed: " + ex.getClass().getSimpleName());
+                }
+            }
+        }
+    }
+
+    /** Execute annotated test functions/methods without a main: block.
+     * Class tests receive a new instance each time. CLI exits on nonzero failures.
+     */
+    public int runTests(Ast.Program program) {
+        loadProgram(program);
+        int passed = 0, failed = 0;
+        try {
+            Ast.FnDecl beforeFn = null, afterFn = null;
+            for (Ast.FnDecl f : program.functions) {
+                if (f.annotations.contains("BeforeEach")) {
+                    if (beforeFn != null) throw new RuntimeException("Multiple top-level @BeforeEach hooks");
+                    beforeFn = f;
+                }
+                if (f.annotations.contains("AfterEach")) {
+                    if (afterFn != null) throw new RuntimeException("Multiple top-level @AfterEach hooks");
+                    afterFn = f;
+                }
+            }
+            for (Ast.FnDecl f : program.functions) {
+                if (!f.annotations.contains("Test")) continue;
+                RuntimeException error = null;
+                try {
+                    if (!f.params.isEmpty()) throw new RuntimeException("@Test requires zero parameters");
+                    if (beforeFn != null) invokeFunction(beforeFn, List.of());
+                    invokeFunction(f, List.of());
+                } catch (RuntimeException ex) {
+                    error = ex;
+                } finally {
+                    if (afterFn != null) {
+                        try { invokeFunction(afterFn, List.of()); }
+                        catch (RuntimeException ex) {
+                            if (error == null) error = ex;
+                            else error.addSuppressed(ex);
+                        }
+                    }
+                }
+                if (error == null) {
+                    passed++;
+                    out.println("[PASS] " + f.name);
+                } else {
+                    failed++;
+                    out.println("[FAIL] " + f.name + ": " + error.getMessage());
+                }
+            }
+            for (Ast.ClassDecl cls : program.classes) {
+                Ast.MethodDecl before = null, after = null;
+                for (Ast.MethodDecl m : cls.methods) {
+                    if (m.annotations.contains("BeforeEach")) {
+                        if (before != null) throw new RuntimeException("Multiple @BeforeEach in " + cls.name);
+                        before = m;
+                    }
+                    if (m.annotations.contains("AfterEach")) {
+                        if (after != null) throw new RuntimeException("Multiple @AfterEach in " + cls.name);
+                        after = m;
+                    }
+                }
+                for (Ast.MethodDecl m : cls.methods) {
+                    if (!m.annotations.contains("Test")) continue;
+                    RuntimeException error = null;
+                    OwObject instance = null;
+                    try {
+                        if (!m.params.isEmpty()) throw new RuntimeException("@Test requires zero parameters");
+                        instance = (OwObject) instantiate(new Ast.NewExpr(cls.name, List.of()), globals);
+                        if (before != null) invokeMethod(instance, before.name, List.of(), true);
+                        invokeMethod(instance, m.name, List.of(), true);
+                    } catch (RuntimeException ex) {
+                        error = ex;
+                    } finally {
+                        if (instance != null && after != null) {
+                            try { invokeMethod(instance, after.name, List.of(), true); }
+                            catch (RuntimeException ex) {
+                                if (error == null) error = ex;
+                                else error.addSuppressed(ex);
+                            }
+                        }
+                    }
+                    if (error == null) {
+                        passed++;
+                        out.println("[PASS] " + cls.name + "." + m.name);
+                    } else {
+                        failed++;
+                        out.println("[FAIL] " + cls.name + "." + m.name + ": " + error.getMessage());
+                    }
+                }
+            }
+            if (passed + failed == 0) {
+                out.println("No @Test functions or methods found.");
+                return 1;
+            }
+            out.println("OW tests: " + passed + " passed, " + failed + " failed.");
+            return failed;
         } finally {
             if (ui != null) ui.shutdown();
             for (RuntimeExtension extension : extensions) {
@@ -488,15 +594,23 @@ public class Interpreter {
         }
         if (s instanceof Ast.TryStmt t) {
             try {
-                execBlock(t.tryBody, env);
-            } catch (ReturnSignal | ResponseSignal signal) {
-                throw signal; // control flow, not an error — must not be caught
-            } catch (RuntimeException ex) {
-                String msg = ex.getMessage();
-                assign(t.catchName, msg == null ? "" : msg, env);
-                execBlock(t.catchBody, env);
+                try {
+                    execBlock(t.tryBody, env);
+                } catch (ReturnSignal | ResponseSignal signal) {
+                    throw signal; // OW return/respond must not be caught
+                } catch (RuntimeException ex) {
+                    if (t.catchBody == null) throw ex;
+                    String msg = ex.getMessage();
+                    assign(t.catchName, msg == null ? "" : msg, env);
+                    execBlock(t.catchBody, env);
+                }
+            } finally {
+                if (t.finallyBody != null) execBlock(t.finallyBody, env);
             }
             return;
+        }
+        if (s instanceof Ast.ThrowStmt thrown) {
+            throw new RuntimeException(formatValue(evalExpr(thrown.value, env)));
         }
         if (s instanceof Ast.SwitchStmt sw) {
             Object subject = evalExpr(sw.subject, env);
@@ -1728,9 +1842,7 @@ public class Interpreter {
         }
         if (truthy(evalExpr(call.args.get(0), env))) return 0;
         String message = call.args.size() == 2 ? str(call, 1, env) : "";
-        System.err.println(message.isEmpty() ? "Assertion failed" : "Assertion failed: " + message);
-        System.exit(1);
-        return 0; // unreachable
+        throw new RuntimeException(message.isEmpty() ? "Assertion failed" : "Assertion failed: " + message);
     }
 
     // ---- audio & microphone builtins (pure JDK javax.sound.sampled) ----
