@@ -84,6 +84,16 @@ but nested arrays and object memory management are not supported. See
 [native array reference counting](docs/native-array-memory.md), and
 [typed native array functions](docs/native-array-functions.md).
 
+## Native strings (experimental)
+
+The LLVM backend supports immutable UTF-8 strings passed through typed
+functions (`fn identity(value string) -> string:`), content-based string
+equality/inequality, and `len(string)` with Java-compatible UTF-16 length
+semantics. Run `ow llvm examples/native_strings.ow`; compiled executables
+do not require a JVM. **Dynamic concatenation, owned strings, string arrays,
+and dictionaries are not yet supported natively.** See
+[native strings and limitations](docs/native-strings.md).
+
 ## Language features
 
 Ow is now a fully object-oriented language while keeping its clean,
