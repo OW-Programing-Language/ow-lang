@@ -254,6 +254,8 @@ public final class DependencyManager {
     }
 
     private static String gitHead(Path directory) throws IOException {
+        Path bundled = directory.resolve(".ow-resolved");
+        if (Files.isRegularFile(bundled)) return Files.readString(bundled).trim();
         if (!Files.isDirectory(directory.resolve(".git"))) return "";
         return git(directory, "rev-parse", "HEAD").trim();
     }
@@ -335,6 +337,38 @@ public final class DependencyManager {
 
     private static String yamlString(String value) {
         return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+    }
+
+
+    /** Copy locked OW sources into an application image, without bundling .git. */
+    public static void stageForPackage(Path entry, Path game) throws IOException {
+        Path manifest = findManifest(entry);
+        if (manifest == null) return;
+        Map<String, Path> resolved = forEntry(entry);
+        Files.copy(manifest, game.resolve("dependencies.yml"), StandardCopyOption.REPLACE_EXISTING);
+        Path lockfile = manifest.getParent().resolve("dependencies.lock.yml");
+        Files.copy(lockfile, game.resolve("dependencies.lock.yml"), StandardCopyOption.REPLACE_EXISTING);
+        Map<String, Locked> locks = readLock(manifest.getParent());
+        for (var item : resolved.entrySet()) {
+            Path source = item.getValue();
+            Path target = game.resolve(".ow").resolve("deps").resolve(item.getKey());
+            try (Stream<Path> walk = Files.walk(source)) {
+                for (Path path : (Iterable<Path>) walk::iterator) {
+                    if (Files.isSymbolicLink(path)) continue;
+                    Path relative = source.relativize(path);
+                    if (relative.getNameCount() > 0 && relative.getName(0).toString().equals(".git")) continue;
+                    Path destination = target.resolve(relative);
+                    if (Files.isDirectory(path)) {
+                        Files.createDirectories(destination);
+                    } else if (Files.isRegularFile(path)) {
+                        Files.createDirectories(destination.getParent());
+                        Files.copy(path, destination, StandardCopyOption.REPLACE_EXISTING);
+                    }
+                }
+            }
+            Files.writeString(target.resolve(".ow-resolved"), locks.get(item.getKey()).commit(),
+                    StandardCharsets.UTF_8);
+        }
     }
 
     public static void command(String[] args) throws IOException {
