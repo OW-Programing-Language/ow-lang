@@ -322,8 +322,22 @@ public class LlvmIrGen {
                         .append(array.ref).append(", 0\n");
                 return new Value(length, "i32");
             }
-            if (call.name.equals("input") || call.name.equals("int")
-                    || call.name.equals("array")) {
+            if (call.name.equals("array")) {
+                if (call.args.size() != 2)
+                    throw new RuntimeException("LLVM backend: array expects size and fill");
+                Value count = genExpr(call.args.get(0));
+                if (!count.type.equals("i32"))
+                    throw new RuntimeException("LLVM backend: array size must be an integer");
+                // Interpreter rejects an invalid size before evaluating the fill.
+                checkNonNegativeArraySize(count);
+                Value fill = genExpr(call.args.get(1));
+                if (!fill.type.equals("i32"))
+                    throw new RuntimeException("LLVM backend: native arrays currently store only integers");
+                Value storage = allocatedArrayData(count);
+                fillArrayData(storage, count, fill);
+                return buildArrayValue(count.ref, storage.ref);
+            }
+            if (call.name.equals("input") || call.name.equals("int")) {
                 throw new RuntimeException("LLVM backend: builtin '" + call.name + "' is not supported yet");
             }
             if (!functionNames.contains(call.name)) {
@@ -353,9 +367,32 @@ public class LlvmIrGen {
      * performing a null dereference.
      */
     private Value allocatedArrayData(int count) {
+        return allocatedArrayDataRaw(Integer.toString(Math.max(1, count)));
+    }
+
+    /** Runtime-sized arrays allocate at least one element, including for len=0.
+     * This is a signed i32 size checked for negativity before reaching here;
+     * zero extension makes the calloc byte count well-defined on 64-bit targets.
+     */
+    private Value allocatedArrayData(Value count) {
+        if (!count.type.equals("i32"))
+            throw new RuntimeException("LLVM backend: array size must be an integer");
+        String empty = newTemp();
+        body.append("  ").append(empty).append(" = icmp eq i32 ")
+                .append(count.ref).append(", 0\n");
+        String actualCount = newTemp();
+        body.append("  ").append(actualCount).append(" = select i1 ")
+                .append(empty).append(", i32 1, i32 ").append(count.ref).append("\n");
+        String wideCount = newTemp();
+        body.append("  ").append(wideCount).append(" = zext i32 ")
+                .append(actualCount).append(" to i64\n");
+        return allocatedArrayDataRaw(wideCount);
+    }
+
+    private Value allocatedArrayDataRaw(String count64) {
         String raw = newTemp();
         body.append("  ").append(raw).append(" = call i8* @calloc(i64 ")
-                .append(Math.max(1, count))
+                .append(count64)
                 .append(", i64 4)\n");
         String ok = newTemp();
         body.append("  ").append(ok).append(" = icmp ne i8* ").append(raw).append(", null\n");
@@ -372,6 +409,58 @@ public class LlvmIrGen {
         body.append("  ").append(data).append(" = bitcast i8* ")
                 .append(raw).append(" to i32*\n");
         return new Value(data, "i32*");
+    }
+
+    /** Reject negative dynamic sizes before evaluating fill or allocating. */
+    private void checkNonNegativeArraySize(Value count) {
+        String valid = newTemp();
+        body.append("  ").append(valid).append(" = icmp sge i32 ")
+                .append(count.ref).append(", 0\n");
+        int id = labelId++;
+        String ok = "array.size.ok." + id;
+        String failure = "array.size.fail." + id;
+        body.append("  br i1 ").append(valid).append(", label %")
+                .append(ok).append(", label %").append(failure).append("\n");
+        body.append(failure).append(":\n");
+        body.append("  call void @abort()\n");
+        body.append("  unreachable\n");
+        body.append(ok).append(":\n");
+    }
+
+    /** Initialize a runtime-sized array, evaluating the fill expression once.
+     * An SSA phi counter avoids an alloca for every invocation inside loops.
+     */
+    private void fillArrayData(Value storage, Value count, Value fill) {
+        int id = labelId++;
+        String start = "array.fill.start." + id;
+        String cond = "array.fill.cond." + id;
+        String loop = "array.fill.body." + id;
+        String end = "array.fill.end." + id;
+        String counter = newTemp();
+        String next = newTemp();
+
+        body.append("  br label %").append(start).append("\n");
+        body.append(start).append(":\n");
+        body.append("  br label %").append(cond).append("\n");
+        body.append(cond).append(":\n");
+        body.append("  ").append(counter).append(" = phi i32 [ 0, %")
+                .append(start).append(" ], [ ").append(next)
+                .append(", %").append(loop).append(" ]\n");
+        String less = newTemp();
+        body.append("  ").append(less).append(" = icmp slt i32 ")
+                .append(counter).append(", ").append(count.ref).append("\n");
+        body.append("  br i1 ").append(less).append(", label %")
+                .append(loop).append(", label %").append(end).append("\n");
+        body.append(loop).append(":\n");
+        String address = newTemp();
+        body.append("  ").append(address).append(" = getelementptr i32, i32* ")
+                .append(storage.ref).append(", i32 ").append(counter).append("\n");
+        body.append("  store i32 ").append(fill.ref).append(", i32* ")
+                .append(address).append("\n");
+        body.append("  ").append(next).append(" = add i32 ")
+                .append(counter).append(", 1\n");
+        body.append("  br label %").append(cond).append("\n");
+        body.append(end).append(":\n");
     }
 
     private Value buildArrayValue(String length, String data) {
