@@ -72,12 +72,13 @@ public class NativeArrayLlvmTest {
         assertTrue(e.getMessage().contains("only integers"));
     }
 
-    @Test public void stringLenDoesNotSilentlyProduceArrayLength() {
-        RuntimeException e = assertThrows(RuntimeException.class, () -> ir("""
+    @Test public void stringLenUsesUtf16CodeUnitsRatherThanArrayHeader() {
+        String llvm = ir("""
                 main:
                   print: len("hello")
-                """));
-        assertTrue(e.getMessage().contains("integer arrays"));
+                """);
+        assertTrue(llvm.contains("call i32 @__ow_native_string_utf16len(i8*"));
+        assertFalse(llvm.contains("extractvalue %ow.array %t"));
     }
 
     @Test public void indexingNonArrayFailsAtCompileTime() {
