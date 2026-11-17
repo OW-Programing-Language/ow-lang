@@ -2,8 +2,8 @@
 
 The LLVM backend now lowers **integer-array literals** using a two-field
 `%ow.array` header: a 32-bit length and a pointer to shared heap backing
-storage. This is an incremental native feature, **not yet a complete
-memory-managed array implementation**.
+storage. This is an incremental native feature with **reference-counted** lifetime
+management for the native i32 array subset. It is not a full garbage collector.
 
 Supported natively:
 - `set items: [1, 2, 3]` and `set empty: []`
@@ -61,10 +61,11 @@ fills each 32-bit element and allocates at least one slot for empty arrays.
 - Arrays are restricted to **32-bit integer elements**. Mixed arrays,
   strings, nested arrays, and dictionaries are not supported by this lowering.
 - Passing and returning arrays across functions are not yet supported in native mode.
-- **Native array allocations are not reclaimed yet.** This milestone
-  deliberately uses `calloc` with shared mutable backing storage, but
-  a proper native ownership/GC strategy is still required before long-running
-  workloads can use these arrays safely without memory growth.
+- **Native i32 array allocations now use reference counting.** Shared aliases
+  keep backing storage alive; the last owner releases it. This is not yet
+  general memory management for nested arrays, objects or cycles. See
+  [native array memory management](native-array-memory.md) for details and
+  AddressSanitizer validation.
 - Bounds and allocation failures abort rather than raising OW exceptions;
   native exception integration is a separate milestone.
 - The interpreter remains the reference implementation for full OW semantics.

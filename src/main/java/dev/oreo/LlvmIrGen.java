@@ -8,11 +8,20 @@ public class LlvmIrGen {
     private static class Value {
         final String ref;
         final String type;
-        Value(String ref, String type) { this.ref = ref; this.type = type; }
+        // True when an array expression creates its own reference. Storing such
+        // a value transfers ownership; loading an array variable only borrows.
+        final boolean owned;
+        Value(String ref, String type) { this(ref, type, false); }
+        Value(String ref, String type, boolean owned) {
+            this.ref = ref; this.type = type; this.owned = owned;
+        }
     }
 
     private final StringBuilder globals = new StringBuilder();
     private StringBuilder body;
+    // All array slots are zero-initialized at function entry so any control
+    // flow path can release them safely, even if a branch never executes.
+    private StringBuilder entryAllocs;
     private int tempId;
     private int labelId;
     private int strCount;
@@ -26,6 +35,9 @@ public class LlvmIrGen {
         strCount = 0;
         functionNames.clear();
         for (Ast.FnDecl fn : program.functions) {
+            if (fn.name.startsWith("__ow_native_array_")) {
+                throw new RuntimeException("LLVM backend: reserved native runtime function name: " + fn.name);
+            }
             if (!functionNames.add(fn.name)) {
                 throw new RuntimeException("Duplicate function: " + fn.name);
             }
@@ -40,21 +52,25 @@ public class LlvmIrGen {
         StringBuilder out = new StringBuilder();
         out.append("; ModuleID = '").append(moduleName).append("'\n");
         out.append("declare i32 @printf(i8*, ...)\n");
-        // The first native collection representation: a value-semantic header
-        // with a shared heap backing store (OW array aliases stay aliases).
-        out.append("%ow.array = type { i32, i32* }\n");
+        // A native integer array has length, shared backing storage and
+        // reference-count pointer. The interpreter remains the full reference
+        // semantics implementation; this ARC subset only covers i32 arrays.
+        out.append("%ow.array = type { i32, i32*, i32* }\n");
         out.append("declare i8* @calloc(i64, i64)\n");
+        out.append("declare void @free(i8*)\n");
         out.append("declare void @abort() noreturn\n");
         out.append("@.fmt_int = private constant [4 x i8] c\"%d\\0A\\00\"\n");
         out.append("@.fmt_str = private constant [4 x i8] c\"%s\\0A\\00\"\n");
         out.append(globals);
         out.append('\n');
+        out.append(nativeArrayHelpers());
         out.append(fnsCode);
         return out.toString();
     }
 
     private String emitFunction(Ast.FnDecl fn) {
         body = new StringBuilder();
+        entryAllocs = new StringBuilder();
         tempId = 0;
         labelId = 0;
         locals = new HashMap<>();
@@ -77,13 +93,15 @@ public class LlvmIrGen {
         }
 
         for (Ast.Stmt s : fn.body) genStmt(s);
+        releaseAllArrayLocals();
         body.append("  ret i32 0\n");
         body.append("}\n\n");
-        return header.toString() + body.toString();
+        return header.toString() + entryAllocs + body;
     }
 
     private String emitMain(List<Ast.Stmt> mainBody) {
         body = new StringBuilder();
+        entryAllocs = new StringBuilder();
         tempId = 0;
         labelId = 0;
         locals = new HashMap<>();
@@ -93,9 +111,10 @@ public class LlvmIrGen {
         header.append("define i32 @main() {\nentry:\n");
 
         for (Ast.Stmt s : mainBody) genStmt(s);
+        releaseAllArrayLocals();
         body.append("  ret i32 0\n");
         body.append("}\n");
-        return header.toString() + body.toString();
+        return header.toString() + entryAllocs + body;
     }
 
     private void genStmt(Ast.Stmt st) {
@@ -106,18 +125,33 @@ public class LlvmIrGen {
                 String ptr = "%" + s.name;
                 locals.put(s.name, ptr);
                 localTypes.put(s.name, v.type);
-                body.append("  ").append(ptr).append(" = alloca ").append(v.type).append("\n");
-                body.append("  store ").append(v.type).append(" ").append(v.ref)
-                        .append(", ").append(v.type).append("* ").append(ptr).append("\n");
+                if (v.type.equals("%ow.array")) {
+                    // A variable first seen in a conditional or loop must
+                    // have an initialized slot on every control-flow path.
+                    entryAllocs.append("  ").append(ptr)
+                            .append(" = alloca %ow.array\n");
+                    entryAllocs.append("  store %ow.array zeroinitializer, %ow.array* ")
+                            .append(ptr).append("\n");
+                } else {
+                    body.append("  ").append(ptr).append(" = alloca ")
+                            .append(v.type).append("\n");
+                }
             } else {
                 String knownType = localTypes.get(s.name);
                 if (!knownType.equals(v.type)) {
                     throw new RuntimeException("Variable '" + s.name + "' was " + knownType
                             + " but assigned " + v.type);
                 }
-                body.append("  store ").append(v.type).append(" ").append(v.ref)
-                        .append(", ").append(v.type).append("* ").append(existing).append("\n");
             }
+            if (v.type.equals("%ow.array")) {
+                // Retain BEFORE releasing the former owner so "set a: a"
+                // and aliases sharing the same allocation stay valid.
+                if (!v.owned) retainArray(v);
+                releaseArrayFromSlot(locals.get(s.name));
+            }
+            String ptr = locals.get(s.name);
+            body.append("  store ").append(v.type).append(" ").append(v.ref)
+                    .append(", ").append(v.type).append("* ").append(ptr).append("\n");
             return;
         }
 
@@ -199,6 +233,7 @@ public class LlvmIrGen {
             if (!v.type.equals("i32")) {
                 throw new RuntimeException("LLVM backend: return only supports integers");
             }
+            releaseAllArrayLocals();
             body.append("  ret i32 ").append(v.ref).append("\n");
             String dead = "after.return." + (labelId++);
             body.append(dead).append(":\n");
@@ -206,7 +241,9 @@ public class LlvmIrGen {
         }
 
         if (st instanceof Ast.CallStmt c) {
-            genExpr(c.call);
+            Value result = genExpr(c.call);
+            // An unassigned array(...) expression owns a temporary reference.
+            if (result.owned) releaseArray(result);
             return;
         }
 
@@ -235,10 +272,8 @@ public class LlvmIrGen {
             return new Value(b.value ? "1" : "0", "i32");
         }
         if (e instanceof Ast.ArrayLit a) {
-            // Array contents are heap-backed, so "set alias: original" shares
-            // mutations as in OW's interpreter (copying the two-field header).
-            // A future native runtime will own reclamation; LLVM does not
-            // currently lower arrays across function boundaries.
+            // Array contents are heap-backed. Aliases share mutations, while
+            // retaining/releasing references prevents premature frees.
             int count = a.elements.size();
             Value storage = allocatedArrayData(count);
             for (int i = 0; i < count; i++) {
@@ -270,6 +305,8 @@ public class LlvmIrGen {
             String result = newTemp();
             body.append("  ").append(result).append(" = load i32, i32* ")
                     .append(ptr).append("\n");
+            // Literal/dynamically created temporary arrays must not leak.
+            if (target.owned) releaseArray(target);
             return new Value(result, "i32");
         }
         if (e instanceof Ast.BinOp b) {
@@ -320,6 +357,7 @@ public class LlvmIrGen {
                 String length = newTemp();
                 body.append("  ").append(length).append(" = extractvalue %ow.array ")
                         .append(array.ref).append(", 0\n");
+                if (array.owned) releaseArray(array);
                 return new Value(length, "i32");
             }
             if (call.name.equals("array")) {
@@ -464,6 +502,27 @@ public class LlvmIrGen {
     }
 
     private Value buildArrayValue(String length, String data) {
+        // A newly created native array owns exactly one reference. Each
+        // independently allocated refcount is freed with its backing store.
+        String refsRaw = newTemp();
+        body.append("  ").append(refsRaw)
+                .append(" = call i8* @calloc(i64 1, i64 4)\n");
+        String valid = newTemp();
+        body.append("  ").append(valid)
+                .append(" = icmp ne i8* ").append(refsRaw).append(", null\n");
+        int id = labelId++;
+        String ok = "array.refs.ok." + id;
+        String failure = "array.refs.fail." + id;
+        body.append("  br i1 ").append(valid).append(", label %")
+                .append(ok).append(", label %").append(failure).append("\n");
+        body.append(failure).append(":\n");
+        body.append("  call void @abort()\n");
+        body.append("  unreachable\n");
+        body.append(ok).append(":\n");
+        String refs = newTemp();
+        body.append("  ").append(refs).append(" = bitcast i8* ")
+                .append(refsRaw).append(" to i32*\n");
+        body.append("  store i32 1, i32* ").append(refs).append("\n");
         String header = newTemp();
         body.append("  ").append(header)
                 .append(" = insertvalue %ow.array undef, i32 ")
@@ -472,7 +531,11 @@ public class LlvmIrGen {
         body.append("  ").append(joined)
                 .append(" = insertvalue %ow.array ").append(header)
                 .append(", i32* ").append(data).append(", 1\n");
-        return new Value(joined, "%ow.array");
+        String withRefs = newTemp();
+        body.append("  ").append(withRefs)
+                .append(" = insertvalue %ow.array ").append(joined)
+                .append(", i32* ").append(refs).append(", 2\n");
+        return new Value(withRefs, "%ow.array", true);
     }
 
     private String checkedArrayElement(Value array, Value index) {
@@ -508,6 +571,72 @@ public class LlvmIrGen {
         body.append("  ").append(element).append(" = getelementptr i32, i32* ")
                 .append(data).append(", i32 ").append(index.ref).append("\n");
         return element;
+    }
+
+    private void retainArray(Value array) {
+        body.append("  call void @__ow_native_array_retain(%ow.array ")
+                .append(array.ref).append(")\n");
+    }
+
+    private void releaseArray(Value array) {
+        body.append("  call void @__ow_native_array_release(%ow.array ")
+                .append(array.ref).append(")\n");
+    }
+
+    private void releaseArrayFromSlot(String ptr) {
+        String old = newTemp();
+        body.append("  ").append(old).append(" = load %ow.array, %ow.array* ")
+                .append(ptr).append("\n");
+        releaseArray(new Value(old, "%ow.array"));
+    }
+
+    private void releaseAllArrayLocals() {
+        // Deterministic order is not required: each slot owns one reference.
+        for (Map.Entry<String, String> entry : localTypes.entrySet()) {
+            if (entry.getValue().equals("%ow.array"))
+                releaseArrayFromSlot(locals.get(entry.getKey()));
+        }
+    }
+
+    private static String nativeArrayHelpers() {
+        return """
+                define void @__ow_native_array_retain(%ow.array %array) {
+                entry:
+                  %refs = extractvalue %ow.array %array, 2
+                  %absent = icmp eq i32* %refs, null
+                  br i1 %absent, label %done, label %increment
+                increment:
+                  %before = load i32, i32* %refs
+                  %after = add i32 %before, 1
+                  store i32 %after, i32* %refs
+                  br label %done
+                done:
+                  ret void
+                }
+
+                define void @__ow_native_array_release(%ow.array %array) {
+                entry:
+                  %refs = extractvalue %ow.array %array, 2
+                  %absent = icmp eq i32* %refs, null
+                  br i1 %absent, label %done, label %decrement
+                decrement:
+                  %before = load i32, i32* %refs
+                  %after = sub i32 %before, 1
+                  store i32 %after, i32* %refs
+                  %last = icmp eq i32 %after, 0
+                  br i1 %last, label %dispose, label %done
+                dispose:
+                  %data = extractvalue %ow.array %array, 1
+                  %rawData = bitcast i32* %data to i8*
+                  call void @free(i8* %rawData)
+                  %rawRefs = bitcast i32* %refs to i8*
+                  call void @free(i8* %rawRefs)
+                  br label %done
+                done:
+                  ret void
+                }
+
+                """;
     }
 
     private String emitStringLiteral(String s) {

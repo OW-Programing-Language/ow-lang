@@ -19,7 +19,7 @@ public class NativeArrayLlvmTest {
                   print: len(numbers)
                   print: numbers[1]
                 """);
-        assertTrue(llvm.contains("%ow.array = type { i32, i32* }"));
+        assertTrue(llvm.contains("%ow.array = type { i32, i32*, i32* }"));
         assertTrue(llvm.contains("call i8* @calloc(i64 3, i64 4)"));
         assertTrue(llvm.contains("insertvalue %ow.array"));
         assertTrue(llvm.contains("extractvalue %ow.array"));

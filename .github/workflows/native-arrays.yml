@@ -6,6 +6,8 @@ on:
       - 'src/**'
       - 'examples/native_arrays*.ow'
       - 'examples/native_dynamic_arrays*.ow'
+      - 'examples/native_array_memory.ow'
+      - 'docs/native-array-memory.md'
       - 'docs/native-arrays.md'
       - '.github/workflows/native-arrays.yml'
       - 'pom.xml'
@@ -58,6 +60,15 @@ jobs:
             exit 1
           fi
           echo "Negative array length rejected with exit code $status"
+      - name: Verify native ARC under AddressSanitizer and leak detection
+        run: |
+          java -jar target/OwIDE.jar llvm examples/native_array_memory.ow target/native-array-memory.ll
+          clang -O0 -g -fsanitize=address -fno-omit-frame-pointer target/native-array-memory.ll -o target/native-array-memory-asan
+          java -jar target/OwIDE.jar run examples/native_array_memory.ow > target/memory-interpreted.txt
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 ./target/native-array-memory-asan > target/memory-native.txt
+          diff -u target/memory-interpreted.txt target/memory-native.txt
+          printf '5\n7\n3\n4\n11\n19\n19\n8\n11\n0\n' > target/memory-expected.txt
+          diff -u target/memory-expected.txt target/memory-native.txt
       - name: Out-of-range native accesses must fail
         shell: bash
         run: |

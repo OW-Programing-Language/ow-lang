@@ -1,0 +1,36 @@
+# Native reference-counted integer arrays. This output must match the interpreter.
+fn localValue():
+  set internal: array(5, 8)
+  print: internal[2]
+  return: 11
+
+main:
+  set values: array(3, 5)
+  set alias: values
+  set values: array(3, 7)
+  print: alias[2]
+  print: values[2]
+  set alias: values
+  set values: values
+
+  set temp: [1, 2]
+  set temp: [3, 4]
+  print: temp[0]
+
+  print: len(array(4, 9))
+  print: array(2, 11)[1]
+  call: array(3, 7)
+
+  set i: 0
+  while: i < 20
+    set rotating: array(5, i)
+    set i: i + 1
+  print: rotating[3]
+  set other: rotating
+  set rotating: []
+  print: other[2]
+
+  print: localValue()
+  if: false
+    set unused: [0, 0]
+  print: len(array(0, 0))
