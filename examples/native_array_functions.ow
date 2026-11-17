@@ -13,7 +13,7 @@ fn mirror(values array) -> array:
 fn make(size int, fill int) -> array:
   return: array(size, fill)
 
-fn replace(source array) -> array:
+fn preserve(source array) -> array:
   set local: source
   set source: [88, 89]
   return: local
@@ -39,7 +39,7 @@ main:
   set acquired: make(2, 17)
   print: len(acquired)
 
-  set borrowed: replace(returned)
+  set borrowed: preserve(returned)
   print: borrowed[0]
   print: returned[0]
 
