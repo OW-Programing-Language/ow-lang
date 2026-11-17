@@ -138,8 +138,7 @@ public class Parser {
             if (!matchIdent("fn")) throw err("interface body expects 'fn' signatures");
             String m = expect(Type.IDENT).text;
             ParamSpec params = parseTypedParamList();
-            String returnType = parseReturnType();
-            expect(Type.NEWLINE);
+            String returnType = parseSignatureReturnType();
             methods.add(new Ast.MethodSig(m, params.names, params.types, returnType));
         }
         expect(Type.DEDENT);
@@ -180,8 +179,7 @@ public class Parser {
             } else if (matchIdent("fn")) {
                 Lexer.Token method = expect(Type.IDENT);
                 ParamSpec params = parseTypedParamList();
-                String result = parseReturnType();
-                expect(Type.NEWLINE);
+                String result = parseSignatureReturnType();
                 methods.add(new Ast.MethodSig(method.text, params.names, params.types,
                                               result, Ast.SourceSpan.from(method)));
             } else {
@@ -439,6 +437,34 @@ public class Parser {
             return expect(Type.IDENT).text;
         }
         return null;
+    }
+
+    /**
+     * Signature-only methods (interfaces and module_type) may use either
+     * legacy `fn f(x int) -> int` or:
+     *
+     * fn f(x: int):
+     *   returns: int
+     */
+    private String parseSignatureReturnType() {
+        String legacy = parseReturnType();
+        if (!match(Type.COLON)) {
+            expect(Type.NEWLINE);
+            return legacy;
+        }
+        if (legacy != null) {
+            throw err("Return type cannot be declared with both '->' and 'returns:'");
+        }
+        expect(Type.NEWLINE);
+        expect(Type.INDENT);
+        if (!matchIdent("returns")) {
+            throw err("Signature block must begin with 'returns:'");
+        }
+        expect(Type.COLON);
+        String result = expect(Type.IDENT).text;
+        expect(Type.NEWLINE);
+        expect(Type.DEDENT);
+        return result;
     }
 
     /**
