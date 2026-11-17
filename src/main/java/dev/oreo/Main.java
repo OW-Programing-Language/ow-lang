@@ -28,6 +28,21 @@ public class Main {
             case "test" -> {
                 requireFile(args, "test");
                 Path target = Path.of(args[1]);
+                String filter = null;
+                if (args.length > 2) {
+                    if (args.length != 4 || !"--filter".equals(args[2]) ||
+                            !args[3].matches("[A-Za-z_][A-Za-z_0-9]*(\\.[A-Za-z_][A-Za-z_0-9]*)?")) {
+                        System.err.println("Usage: ow test <file|dir> [--filter TestName|ClassName.testMethod]");
+                        System.exit(2);
+                        return;
+                    }
+                    filter = args[3];
+                }
+                if (filter != null && Files.isDirectory(target)) {
+                    System.err.println("--filter requires a test file, not a directory");
+                    System.exit(2);
+                    return;
+                }
                 List<Path> tests = new ArrayList<>();
                 if (Files.isDirectory(target)) {
                     try (Stream<Path> walk = Files.walk(target)) {
@@ -44,7 +59,7 @@ public class Main {
                 int failures = 0;
                 for (Path file : tests) {
                     System.out.println("Running OW tests: " + file);
-                    failures += new Interpreter(System.out).runTests(Loader.loadTests(file));
+                    failures += new Interpreter(System.out).runTests(Loader.loadTests(file), filter);
                 }
                 if (failures > 0) System.exit(1);
             }
@@ -143,7 +158,7 @@ public class Main {
                   ow <file.ow>          Run a program (interpreter)
                   ow run <file.ow>      Run a program (interpreter)
                   ow check <file.ow>    Validate module/functor types without executing main
-                  ow test <file|dir>    Run annotated OW tests (@Test / lifecycle hooks)
+                  ow test <file|dir> [--filter name]  Run OW tests, optionally one function or Class.method
                   ow llvm <file> [out]  Generate LLVM IR for the i32/static-module subset
                   ow build <file> [out] Compile supported OW programs (needs LLVM/Zig)
                   ow deps init [dir]      Create a project dependencies.yml

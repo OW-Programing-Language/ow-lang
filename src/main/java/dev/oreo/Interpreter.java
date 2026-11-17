@@ -318,6 +318,10 @@ public class Interpreter {
      * Class tests receive a new instance each time. CLI exits on nonzero failures.
      */
     public int runTests(Ast.Program program) {
+        return runTests(program, null);
+    }
+
+    public int runTests(Ast.Program program, String filter) {
         loadProgram(program);
         int passed = 0, failed = 0;
         try {
@@ -333,7 +337,7 @@ public class Interpreter {
                 }
             }
             for (Ast.FnDecl f : program.functions) {
-                if (!f.annotations.contains("Test")) continue;
+                if (!f.annotations.contains("Test") || (filter != null && !filter.equals(f.name))) continue;
                 RuntimeException error = null;
                 try {
                     if (!f.params.isEmpty()) throw new RuntimeException("@Test requires zero parameters");
@@ -371,7 +375,7 @@ public class Interpreter {
                     }
                 }
                 for (Ast.MethodDecl m : cls.methods) {
-                    if (!m.annotations.contains("Test")) continue;
+                    if (!m.annotations.contains("Test") || (filter != null && !filter.equals(cls.name + "." + m.name))) continue;
                     RuntimeException error = null;
                     OwObject instance = null;
                     try {
@@ -400,7 +404,7 @@ public class Interpreter {
                 }
             }
             if (passed + failed == 0) {
-                out.println("No @Test functions or methods found.");
+                out.println(filter == null ? "No @Test functions or methods found." : "No @Test matched filter: " + filter);
                 return 1;
             }
             out.println("OW tests: " + passed + " passed, " + failed + " failed.");

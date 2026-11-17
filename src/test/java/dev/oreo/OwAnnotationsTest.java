@@ -119,6 +119,49 @@ public class OwAnnotationsTest {
         assertTrue(buffer.toString().contains("[PASS] passes"));
     }
 
+
+    @Test public void filtersOneMethodAndRunsOnlyItsHooks() {
+        String source = """
+            class CalculatorTest:
+              field value
+              @BeforeEach
+              fn setup():
+                set this.value: 1
+              @Test
+              fn succeeds():
+                call: assert(this.value == 1)
+              @Test
+              fn fails():
+                call: assert(false, "must be skipped")
+              @AfterEach
+              fn cleanup():
+                call: assert(this.value == 1)
+            """;
+        Ast.Program program = new Parser(new Lexer(source).lexAll()).parseProgram();
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        assertEquals(0, new Interpreter(new PrintStream(output)).runTests(program, "CalculatorTest.succeeds"));
+        assertTrue(output.toString().contains("[PASS] CalculatorTest.succeeds"));
+        assertFalse(output.toString().contains("CalculatorTest.fails"));
+        assertTrue(output.toString().contains("1 passed, 0 failed"));
+    }
+
+    @Test public void supportsTopLevelTestFilterAndRejectsUnknownNames() {
+        String source = """
+            @Test
+            fn successful():
+              call: assert(true)
+            @Test
+            fn failure():
+              throw: "should not execute"
+            """;
+        Ast.Program program = new Parser(new Lexer(source).lexAll()).parseProgram();
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        assertEquals(0, new Interpreter(new PrintStream(output)).runTests(program, "successful"));
+        assertTrue(output.toString().contains("[PASS] successful"));
+        assertFalse(output.toString().contains("[FAIL] failure"));
+        assertEquals(1, new Interpreter(new PrintStream(new ByteArrayOutputStream())).runTests(program, "missing"));
+    }
+
     @Test public void invalidAnnotationIsRejected() {
         assertThrows(RuntimeException.class, () -> new Parser(new Lexer("""
             @Unknown
