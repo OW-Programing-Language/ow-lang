@@ -38,7 +38,7 @@ public class LlvmIrGen {
         functionNames.clear();
         functionSignatures.clear();
         for (Ast.FnDecl fn : program.functions) {
-            if (fn.name.startsWith("__ow_native_array_")) {
+            if (fn.name.startsWith("__ow_native_array_") || fn.name.startsWith("__ow_native_string_")) {
                 throw new RuntimeException("LLVM backend: reserved native runtime function name: " + fn.name);
             }
             if (!functionNames.add(fn.name)) {
@@ -57,10 +57,13 @@ public class LlvmIrGen {
         out.append("; ModuleID = '").append(moduleName).append("'\n");
         out.append("declare i32 @printf(i8*, ...)\n");
         out.append("declare i32 @strcmp(i8*, i8*)\n");
+        out.append("declare i64 @strlen(i8*)\n");
+        out.append("declare i8* @memcpy(i8*, i8*, i64)\n");
         // A native integer array has length, shared backing storage and
         // reference-count pointer. The interpreter remains the full reference
         // semantics implementation; this ARC subset only covers i32 arrays.
         out.append("%ow.array = type { i32, i32*, i32* }\n");
+        out.append("%ow.string = type { i8*, i32* }\n");
         out.append("declare i8* @calloc(i64, i64)\n");
         out.append("declare void @free(i8*)\n");
         out.append("declare void @abort() noreturn\n");
@@ -70,6 +73,7 @@ public class LlvmIrGen {
         out.append('\n');
         out.append(nativeArrayHelpers());
         out.append(nativeStringHelpers());
+        out.append(nativeOwnedStringHelpers());
         out.append(fnsCode);
         return out.toString();
     }
@@ -91,7 +95,7 @@ public class LlvmIrGen {
         localTypes = new LinkedHashMap<>();
         currentReturnType = llvmType(fn.returnType);
 
-        if ((currentReturnType.equals("%ow.array") || currentReturnType.equals("i8*")) &&
+        if (isManaged(currentReturnType) &&
             (fn.body.isEmpty() || !(fn.body.get(fn.body.size() - 1) instanceof Ast.ReturnStmt))) {
             throw new RuntimeException("LLVM backend: array/string-returning function '" + fn.name
                     + "' must end with an explicit return");
@@ -115,8 +119,9 @@ public class LlvmIrGen {
                 throw new RuntimeException("LLVM backend: duplicate parameter: " + pname);
             }
             localTypes.put(pname, type);
-            if (type.equals("%ow.array")) {
-                entryAllocs.append("  ").append(ptr).append(" = alloca %ow.array\n");
+            if (isManaged(type)) {
+                entryAllocs.append("  ").append(ptr).append(" = alloca ")
+                        .append(type).append("\n");
             } else {
                 body.append("  ").append(ptr).append(" = alloca ")
                         .append(type).append("\n");
@@ -129,13 +134,13 @@ public class LlvmIrGen {
         }
 
         for (Ast.Stmt st : fn.body) genStmt(st);
-        releaseAllArrayLocals();
+        releaseAllManagedLocals();
         if (currentReturnType.equals("%ow.array")) {
             // This return is in the unreachable after.return block when the
             // final source statement is an explicit return.
             body.append("  ret %ow.array zeroinitializer\n");
-        } else if (currentReturnType.equals("i8*")) {
-            body.append("  ret i8* null\n");
+        } else if (currentReturnType.equals("%ow.string")) {
+            body.append("  ret %ow.string zeroinitializer\n");
         } else {
             body.append("  ret i32 0\n");
         }
@@ -156,7 +161,7 @@ public class LlvmIrGen {
         header.append("define i32 @main() {\nentry:\n");
 
         for (Ast.Stmt s : mainBody) genStmt(s);
-        releaseAllArrayLocals();
+        releaseAllManagedLocals();
         body.append("  ret i32 0\n");
         body.append("}\n");
         return header.toString() + entryAllocs + body;
@@ -170,13 +175,14 @@ public class LlvmIrGen {
                 String ptr = "%" + s.name;
                 locals.put(s.name, ptr);
                 localTypes.put(s.name, v.type);
-                if (v.type.equals("%ow.array")) {
-                    // A variable first seen in a conditional or loop must
-                    // have an initialized slot on every control-flow path.
-                    entryAllocs.append("  ").append(ptr)
-                            .append(" = alloca %ow.array\n");
-                    entryAllocs.append("  store %ow.array zeroinitializer, %ow.array* ")
-                            .append(ptr).append("\n");
+                if (isManaged(v.type)) {
+                    // Release works regardless of which conditional assigned
+                    // this local: all managed slots start as null references.
+                    entryAllocs.append("  ").append(ptr).append(" = alloca ")
+                            .append(v.type).append("\n");
+                    entryAllocs.append("  store ").append(v.type)
+                            .append(" zeroinitializer, ").append(v.type)
+                            .append("* ").append(ptr).append("\n");
                 } else {
                     body.append("  ").append(ptr).append(" = alloca ")
                             .append(v.type).append("\n");
@@ -188,11 +194,11 @@ public class LlvmIrGen {
                             + " but assigned " + v.type);
                 }
             }
-            if (v.type.equals("%ow.array")) {
-                // Retain BEFORE releasing the former owner so "set a: a"
-                // and aliases sharing the same allocation stay valid.
-                if (!v.owned) retainArray(v);
-                releaseArrayFromSlot(locals.get(s.name));
+            if (isManaged(v.type)) {
+                // Retain BEFORE release: self-assignment and shared aliases
+                // must never observe a prematurely freed reference.
+                if (!v.owned) retainManaged(v);
+                releaseManagedFromSlot(locals.get(s.name), v.type);
             }
             String ptr = locals.get(s.name);
             body.append("  store ").append(v.type).append(" ").append(v.ref)
@@ -222,11 +228,13 @@ public class LlvmIrGen {
                         .append(" = getelementptr [4 x i8], [4 x i8]* @.fmt_int, i32 0, i32 0\n");
                 body.append("  call i32 (i8*, ...) @printf(i8* ").append(fmtPtr)
                         .append(", i32 ").append(v.ref).append(")\n");
-            } else if (v.type.equals("i8*")) {
+            } else if (v.type.equals("%ow.string")) {
+                String data = stringData(v);
                 body.append("  ").append(fmtPtr)
                         .append(" = getelementptr [4 x i8], [4 x i8]* @.fmt_str, i32 0, i32 0\n");
                 body.append("  call i32 (i8*, ...) @printf(i8* ").append(fmtPtr)
-                        .append(", i8* ").append(v.ref).append(")\n");
+                        .append(", i8* ").append(data).append(")\n");
+                if (v.owned) releaseManaged(v);
             } else {
                 throw new RuntimeException("Cannot print value of type " + v.type);
             }
@@ -279,12 +287,11 @@ public class LlvmIrGen {
                 throw new RuntimeException("LLVM backend: expected return type "
                         + currentReturnType + " but got " + v.type);
             }
-            if (v.type.equals("%ow.array") && !v.owned) {
-                // Borrowed array returned from a local/parameter must survive
-                // releasing that local's reference on function exit.
-                retainArray(v);
+            if (isManaged(v.type) && !v.owned) {
+                // Borrowed managed values are retained before local cleanup.
+                retainManaged(v);
             }
-            releaseAllArrayLocals();
+            releaseAllManagedLocals();
             body.append("  ret ").append(v.type).append(" ")
                     .append(v.ref).append("\n");
             String dead = "after.return." + (labelId++);
@@ -294,8 +301,8 @@ public class LlvmIrGen {
 
         if (st instanceof Ast.CallStmt c) {
             Value result = genExpr(c.call);
-            // An unassigned array(...) expression owns a temporary reference.
-            if (result.owned) releaseArray(result);
+            // Discarded dynamically allocated results are reclaimed here.
+            if (result.owned) releaseManaged(result);
             return;
         }
 
@@ -317,8 +324,19 @@ public class LlvmIrGen {
         if (e instanceof Ast.IntLit i) {
             return new Value(Integer.toString(i.value), "i32");
         }
-        if (e instanceof Ast.StringLit s) {
-            return new Value(emitStringLiteral(s.value), "i8*");
+        if (e instanceof Ast.StringLit str) {
+            // String literals are static immortal UTF-8 bytes (null refs).
+            // Dynamic strings from '+' share the same value ABI, but have
+            // an allocated reference counter.
+            String data = emitStringLiteral(str.value);
+            String first = newTemp();
+            body.append("  ").append(first).append(" = insertvalue %ow.string undef, i8* ")
+                    .append(data).append(", 0\n");
+            String second = newTemp();
+            body.append("  ").append(second)
+                    .append(" = insertvalue %ow.string ").append(first)
+                    .append(", i32* null, 1\n");
+            return new Value(second, "%ow.string");
         }
         if (e instanceof Ast.BoolLit b) {
             return new Value(b.value ? "1" : "0", "i32");
@@ -364,8 +382,18 @@ public class LlvmIrGen {
         if (e instanceof Ast.BinOp b) {
             Value l = genExpr(b.left);
             Value r = genExpr(b.right);
+            if (l.type.equals("%ow.string") && r.type.equals("%ow.string")
+                    && b.op.equals("+")) {
+                String concatenated = newTemp();
+                body.append("  ").append(concatenated)
+                        .append(" = call %ow.string @__ow_native_string_concat(%ow.string ")
+                        .append(l.ref).append(", %ow.string ").append(r.ref).append(")\n");
+                if (l.owned) releaseManaged(l);
+                if (r.owned) releaseManaged(r);
+                return new Value(concatenated, "%ow.string", true);
+            }
             if (!l.type.equals("i32") || !r.type.equals("i32")) {
-                throw new RuntimeException("LLVM backend: arithmetic requires integers");
+                throw new RuntimeException("LLVM backend: native arithmetic supports i32 or string + string only");
             }
             String op = switch (b.op) {
                 case "+" -> "add";
@@ -382,18 +410,21 @@ public class LlvmIrGen {
         if (e instanceof Ast.Compare c) {
             Value l = genExpr(c.left);
             Value r = genExpr(c.right);
-            if (l.type.equals("i8*") && r.type.equals("i8*")) {
-                // Compare contents, not pointer identity. Immutable native
-                // strings are UTF-8; byte equality matches Java String.equals
-                // for valid UTF-8 (embedded NUL is explicitly rejected).
+            if (l.type.equals("%ow.string") && r.type.equals("%ow.string")) {
+                // Compare UTF-8 contents, not pointer identity. Dynamic
+                // temporaries are released only after strcmp has consumed them.
                 if (!c.op.equals("==") && !c.op.equals("!=")) {
                     throw new RuntimeException(
                             "LLVM backend: only == and != are supported for native strings");
                 }
                 String compared = newTemp();
+                String leftBytes = stringData(l);
+                String rightBytes = stringData(r);
                 body.append("  ").append(compared)
-                        .append(" = call i32 @strcmp(i8* ").append(l.ref)
-                        .append(", i8* ").append(r.ref).append(")\n");
+                        .append(" = call i32 @strcmp(i8* ").append(leftBytes)
+                        .append(", i8* ").append(rightBytes).append(")\n");
+                if (l.owned) releaseManaged(l);
+                if (r.owned) releaseManaged(r);
                 String result = newTemp();
                 body.append("  ").append(result).append(" = icmp ")
                         .append(c.op.equals("==") ? "eq" : "ne")
@@ -422,11 +453,13 @@ public class LlvmIrGen {
                 if (call.args.size() != 1)
                     throw new RuntimeException("LLVM backend: len expects one argument");
                 Value array = genExpr(call.args.get(0));
-                if (array.type.equals("i8*")) {
+                if (array.type.equals("%ow.string")) {
+                    String data = stringData(array);
                     String length = newTemp();
                     body.append("  ").append(length)
                             .append(" = call i32 @__ow_native_string_utf16len(i8* ")
-                            .append(array.ref).append(")\n");
+                            .append(data).append(")\n");
+                    if (array.owned) releaseManaged(array);
                     return new Value(length, "i32");
                 }
                 if (!array.type.equals("%ow.array"))
@@ -475,7 +508,7 @@ public class LlvmIrGen {
                 }
                 // An owned temporary is moved to the callee; borrowed
                 // variables are retained before the next argument is evaluated.
-                if (av.type.equals("%ow.array") && !av.owned) retainArray(av);
+                if (isManaged(av.type) && !av.owned) retainManaged(av);
                 if (i > 0) args.append(", ");
                 args.append(expected).append(" ").append(av.ref);
             }
@@ -483,7 +516,7 @@ public class LlvmIrGen {
             String t = newTemp();
             body.append("  ").append(t).append(" = call ").append(type).append(" @")
                     .append(call.name).append("(").append(args).append(")\n");
-            return new Value(t, type, type.equals("%ow.array"));
+            return new Value(t, type, isManaged(type));
         }
         throw new RuntimeException("Unknown expr: " + e.getClass());
     }
@@ -680,11 +713,44 @@ public class LlvmIrGen {
         releaseArray(new Value(old, "%ow.array"));
     }
 
-    private void releaseAllArrayLocals() {
-        // Deterministic order is not required: each slot owns one reference.
+    private static boolean isManaged(String type) {
+        return type.equals("%ow.array") || type.equals("%ow.string");
+    }
+
+    private String stringData(Value string) {
+        String data = newTemp();
+        body.append("  ").append(data).append(" = extractvalue %ow.string ")
+                .append(string.ref).append(", 0\n");
+        return data;
+    }
+
+    private void retainManaged(Value value) {
+        if (value.type.equals("%ow.array")) retainArray(value);
+        else if (value.type.equals("%ow.string"))
+            body.append("  call void @__ow_native_string_retain(%ow.string ")
+                    .append(value.ref).append(")\n");
+        else throw new IllegalStateException("Not managed: " + value.type);
+    }
+
+    private void releaseManaged(Value value) {
+        if (value.type.equals("%ow.array")) releaseArray(value);
+        else if (value.type.equals("%ow.string"))
+            body.append("  call void @__ow_native_string_release(%ow.string ")
+                    .append(value.ref).append(")\n");
+        else throw new IllegalStateException("Not managed: " + value.type);
+    }
+
+    private void releaseManagedFromSlot(String ptr, String type) {
+        String old = newTemp();
+        body.append("  ").append(old).append(" = load ").append(type)
+                .append(", ").append(type).append("* ").append(ptr).append("\n");
+        releaseManaged(new Value(old, type));
+    }
+
+    private void releaseAllManagedLocals() {
         for (Map.Entry<String, String> entry : localTypes.entrySet()) {
-            if (entry.getValue().equals("%ow.array"))
-                releaseArrayFromSlot(locals.get(entry.getKey()));
+            if (isManaged(entry.getValue()))
+                releaseManagedFromSlot(locals.get(entry.getKey()), entry.getValue());
         }
     }
 
@@ -736,6 +802,93 @@ public class LlvmIrGen {
      * here originate from Java-encoded source literals (not arbitrary input),
      * this operates on well-formed UTF-8 and preserves non-BMP length = 2.
      */
+    /**
+     * A managed string consists of immutable UTF-8 bytes and an optional
+     * reference counter. Literal strings have null refs and are immortal.
+     * Concatenations allocate two independently reclaimed buffers.
+     */
+    private static String nativeOwnedStringHelpers() {
+        return """
+                define void @__ow_native_string_retain(%ow.string %value) {
+                entry:
+                  %refs = extractvalue %ow.string %value, 1
+                  %static = icmp eq i32* %refs, null
+                  br i1 %static, label %done, label %increment
+                increment:
+                  %count = load i32, i32* %refs
+                  %next = add i32 %count, 1
+                  store i32 %next, i32* %refs
+                  br label %done
+                done:
+                  ret void
+                }
+
+                define void @__ow_native_string_release(%ow.string %value) {
+                entry:
+                  %refs = extractvalue %ow.string %value, 1
+                  %static = icmp eq i32* %refs, null
+                  br i1 %static, label %done, label %decrement
+                decrement:
+                  %count = load i32, i32* %refs
+                  %next = sub i32 %count, 1
+                  store i32 %next, i32* %refs
+                  %last = icmp eq i32 %next, 0
+                  br i1 %last, label %dispose, label %done
+                dispose:
+                  %data = extractvalue %ow.string %value, 0
+                  call void @free(i8* %data)
+                  %refsAsBytes = bitcast i32* %refs to i8*
+                  call void @free(i8* %refsAsBytes)
+                  br label %done
+                done:
+                  ret void
+                }
+
+                define %ow.string @__ow_native_string_concat(%ow.string %left, %ow.string %right) {
+                entry:
+                  %ltext = extractvalue %ow.string %left, 0
+                  %rtext = extractvalue %ow.string %right, 0
+                  %llen = call i64 @strlen(i8* %ltext)
+                  %rlen = call i64 @strlen(i8* %rtext)
+                  %sum = add i64 %llen, %rlen
+                  %lenOk = icmp uge i64 %sum, %llen
+                  %bytes = add i64 %sum, 1
+                  %sizeOk = icmp ne i64 %bytes, 0
+                  %valid = and i1 %lenOk, %sizeOk
+                  br i1 %valid, label %allocate, label %invalid
+                invalid:
+                  call void @abort()
+                  unreachable
+                allocate:
+                  %data = call i8* @calloc(i64 %bytes, i64 1)
+                  %dataValid = icmp ne i8* %data, null
+                  br i1 %dataValid, label %copy, label %allocFailure
+                allocFailure:
+                  call void @abort()
+                  unreachable
+                copy:
+                  %first = call i8* @memcpy(i8* %data, i8* %ltext, i64 %llen)
+                  %tail = getelementptr i8, i8* %data, i64 %llen
+                  %rightWithTerminator = add i64 %rlen, 1
+                  %second = call i8* @memcpy(i8* %tail, i8* %rtext, i64 %rightWithTerminator)
+                  %refsRaw = call i8* @calloc(i64 1, i64 4)
+                  %refsValid = icmp ne i8* %refsRaw, null
+                  br i1 %refsValid, label %done, label %refsFailure
+                refsFailure:
+                  call void @free(i8* %data)
+                  call void @abort()
+                  unreachable
+                done:
+                  %refs = bitcast i8* %refsRaw to i32*
+                  store i32 1, i32* %refs
+                  %header = insertvalue %ow.string undef, i8* %data, 0
+                  %result = insertvalue %ow.string %header, i32* %refs, 1
+                  ret %ow.string %result
+                }
+
+                """;
+    }
+
     private static String nativeStringHelpers() {
         return """
                 define i32 @__ow_native_string_utf16len(i8* %text) {
@@ -776,7 +929,7 @@ public class LlvmIrGen {
             return "%ow.array";
         }
         if (declaredType.equals("string")) {
-            return "i8*";
+            return "%ow.string";
         }
         throw new RuntimeException("LLVM backend: unsupported native function type '"
                 + declaredType + "' (supported: int, bool, array, string)");

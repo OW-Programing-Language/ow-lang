@@ -5,6 +5,8 @@ on:
     paths:
       - 'src/**'
       - 'examples/native_strings.ow'
+      - 'examples/native_dynamic_strings.ow'
+      - 'docs/native-dynamic-strings.md'
       - 'docs/native-strings.md'
       - '.github/workflows/native-strings.yml'
       - 'pom.xml'
@@ -38,3 +40,12 @@ jobs:
           clang -O0 -g -fsanitize=address -fno-omit-frame-pointer target/native-strings.ll -o target/native-strings-asan
           ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 ./target/native-strings-asan > target/native-strings-asan.txt
           diff -u target/native-strings-native.txt target/native-strings-asan.txt
+      - name: Compile dynamic strings and check memory lifetime
+        run: |
+          java -jar target/OwIDE.jar llvm examples/native_dynamic_strings.ow target/native-dynamic-strings.ll
+          clang -O0 -g -fsanitize=address -fno-omit-frame-pointer target/native-dynamic-strings.ll -o target/native-dynamic-strings-asan
+          java -jar target/OwIDE.jar run examples/native_dynamic_strings.ow > target/dynamic-strings-interpreted.txt
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 ./target/native-dynamic-strings-asan > target/dynamic-strings-native.txt
+          diff -u target/dynamic-strings-interpreted.txt target/dynamic-strings-native.txt
+          printf 'Hello OW\n8\nHello OW\nBye OW\nhé🙂\n4\ncode\n2\nxy\n7\nxy\nxy\nok\n' > target/dynamic-strings-expected.txt
+          diff -u target/dynamic-strings-expected.txt target/dynamic-strings-native.txt

@@ -4,7 +4,7 @@ import org.junit.Test;
 
 import static org.junit.Assert.*;
 
-/** Native immutable UTF-8 string ABI, contents comparison, and OW length semantics. */
+/** Native UTF-8 string ABI, content comparison, length, and ARC ownership. */
 public class NativeStringLlvmTest {
     private String ir(String source) {
         Ast.Program program = new Parser(new Lexer(source, "native-strings.ow")
@@ -12,17 +12,17 @@ public class NativeStringLlvmTest {
         return new LlvmIrGen().generate(program, "native_strings_test");
     }
 
-    @Test public void typedStringArgumentsAndReturnsUsePointerAbi() {
+    @Test public void typedStringArgumentsAndReturnsUseManagedAbi() {
         String llvm = ir("""
                 fn identity(text string) -> string:
                   return: text
                 main:
                   print: identity("bonjour")
                 """);
-        assertTrue(llvm.contains("define i8* @identity(i8* %text.arg)"));
-        assertTrue(llvm.contains("alloca i8*"));
-        assertTrue(llvm.contains("ret i8*"));
-        assertTrue(llvm.contains("call i8* @identity(i8*"));
+        assertTrue(llvm.contains("define %ow.string @identity(%ow.string %text.arg)"));
+        assertTrue(llvm.contains("alloca %ow.string"));
+        assertTrue(llvm.contains("ret %ow.string"));
+        assertTrue(llvm.contains("call %ow.string @identity(%ow.string"));
     }
 
     @Test public void comparisonsUseContentNotPointerIdentity() {
@@ -58,7 +58,7 @@ public class NativeStringLlvmTest {
                   print: hello
                 """);
         assertTrue(llvm.contains("call i32 (i8*, ...) @printf(i8*"));
-        assertTrue(llvm.contains("alloca i8*"));
+        assertTrue(llvm.contains("alloca %ow.string"));
     }
 
     @Test public void stringOrderingFailsAtCompileTime() {
@@ -86,7 +86,7 @@ public class NativeStringLlvmTest {
                 main:
                   print: identity(42)
                 """));
-        assertTrue(e.getMessage().contains("expects i8*"));
+        assertTrue(e.getMessage().contains("expects %ow.string"));
     }
 
     @Test public void wrongStringReturnFailsAtCompileTime() {
@@ -96,7 +96,7 @@ public class NativeStringLlvmTest {
                 main:
                   print: 0
                 """));
-        assertTrue(e.getMessage().contains("expected return type i8*"));
+        assertTrue(e.getMessage().contains("expected return type %ow.string"));
     }
 
     @Test public void missingFinalStringReturnFailsAtCompileTime() {
@@ -109,11 +109,20 @@ public class NativeStringLlvmTest {
         assertTrue(e.getMessage().contains("must end with an explicit return"));
     }
 
-    @Test public void stringPlusIsStillExplicitlyUnsupported() {
-        RuntimeException e = assertThrows(RuntimeException.class, () -> ir("""
+    @Test public void stringPlusProducesOwnedResultAndRelease() {
+        String llvm = ir("""
                 main:
                   print: "a" + "b"
+                """);
+        assertTrue(llvm.contains("call %ow.string @__ow_native_string_concat"));
+        assertTrue(llvm.contains("call void @__ow_native_string_release(%ow.string"));
+    }
+
+    @Test public void mixedStringAndNumberPlusRemainsUnsupported() {
+        RuntimeException e = assertThrows(RuntimeException.class, () -> ir("""
+                main:
+                  print: "a" + 42
                 """));
-        assertTrue(e.getMessage().contains("arithmetic requires integers"));
+        assertTrue(e.getMessage().contains("string + string only"));
     }
 }

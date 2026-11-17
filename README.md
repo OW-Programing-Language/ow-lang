@@ -86,13 +86,15 @@ but nested arrays and object memory management are not supported. See
 
 ## Native strings (experimental)
 
-The LLVM backend supports immutable UTF-8 strings passed through typed
-functions (`fn identity(value string) -> string:`), content-based string
-equality/inequality, and `len(string)` with Java-compatible UTF-16 length
-semantics. Run `ow llvm examples/native_strings.ow`; compiled executables
-do not require a JVM. **Dynamic concatenation, owned strings, string arrays,
-and dictionaries are not yet supported natively.** See
-[native strings and limitations](docs/native-strings.md).
+The LLVM backend supports UTF-8 strings passed through typed functions
+(`fn identity(value string) -> string:`), content-based comparison,
+`len(string)` with Java-compatible UTF-16 length semantics, and **native
+`string + string` concatenation** with reference-counted dynamic allocations.
+Run `ow llvm examples/native_dynamic_strings.ow`; compiled executables do
+not require a JVM. Native string arrays, dictionaries and mixed string/number
+concatenation remain unsupported. See
+[native strings and limitations](docs/native-strings.md) and
+[dynamic string memory management](docs/native-dynamic-strings.md).
 
 ## Language features
 

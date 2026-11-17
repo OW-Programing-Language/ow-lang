@@ -1,0 +1,47 @@
+# Dynamic native UTF-8 strings with ARC ownership and function ABI.
+fn join(left string, right string) -> string:
+  return: left + right
+
+fn echo(text string) -> string:
+  return: text
+
+fn make() -> string:
+  set local: join("co", "de")
+  set alias: local
+  set local: join("old", "!")
+  return: alias
+
+fn textLen(text string) -> int:
+  return: len(text)
+
+main:
+  set name: "OW"
+  set greeting: join("Hello ", name)
+  print: greeting
+  print: len(greeting)
+
+  set alias: greeting
+  set greeting: join("Bye ", name)
+  print: alias
+  print: greeting
+
+  print: join("hé", "🙂")
+  print: len(join("hé", "🙂"))
+  print: make()
+  print: textLen(join("a", "b"))
+  print: echo(join("x", "y"))
+
+  if: join("a", "b") == "ab"
+    print: 7
+
+  set number: 0
+  while: number < 75
+    set rotating: join("x", "y")
+    set number: number + 1
+  print: rotating
+  set other: rotating
+  set rotating: join("o", "k")
+  print: other
+  print: rotating
+
+  call: join("unused", " value")
