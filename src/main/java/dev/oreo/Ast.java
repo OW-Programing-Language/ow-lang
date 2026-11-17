@@ -307,14 +307,28 @@ public class Ast {
         public final List<String> params;
         public final List<Stmt> body;
         public final List<String> annotations;
+        /** Optional parameter and return annotations; null means unspecified. */
+        public final List<String> paramTypes;
+        public final String returnType;
+
         public FnDecl(String name, List<String> params, List<Stmt> body) {
             this(name, params, body, List.of());
         }
         public FnDecl(String name, List<String> params, List<Stmt> body, List<String> annotations) {
+            this(name, params, body, annotations, Collections.nCopies(params.size(), null), null);
+        }
+        public FnDecl(String name, List<String> params, List<Stmt> body, List<String> annotations,
+                      List<String> paramTypes, String returnType) {
+            if (params.size() != paramTypes.size()) {
+                throw new IllegalArgumentException("Function parameter/type arity mismatch");
+            }
             this.name = name;
-            this.params = params;
-            this.body = body;
+            this.params = List.copyOf(params);
+            this.body = List.copyOf(body);
             this.annotations = List.copyOf(annotations);
+            // List.copyOf rejects nulls, which are valid unspecified types.
+            this.paramTypes = Collections.unmodifiableList(new ArrayList<>(paramTypes));
+            this.returnType = returnType;
         }
     }
 
