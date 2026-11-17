@@ -1,0 +1,32 @@
+name: OW dependencies.yml
+
+on:
+  push:
+    paths:
+      - 'src/**'
+      - 'pom.xml'
+      - 'docs/dependencies.md'
+      - 'examples/dependencies-demo/**'
+      - '.github/workflows/dependencies.yml'
+  pull_request:
+
+jobs:
+  dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: Build OW and run dependency tests
+        run: mvn -B clean package
+      - name: Resolve OW Math Questions from its GitHub repository
+        run: |
+          java -jar target/OwIDE.jar deps install examples/dependencies-demo
+          java -jar target/OwIDE.jar deps list examples/dependencies-demo
+          java -jar target/OwIDE.jar check examples/dependencies-demo/main.ow
+          java -jar target/OwIDE.jar run examples/dependencies-demo/main.ow
+      - name: Ensure repeat installation works from the local lock
+        run: java -jar target/OwIDE.jar deps install examples/dependencies-demo
