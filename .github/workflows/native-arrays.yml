@@ -31,7 +31,7 @@ jobs:
           java -jar target/OwIDE.jar run examples/native_arrays.ow > target/interpreted.txt
           ./target/native-arrays > target/native.txt
           diff -u target/interpreted.txt target/native.txt
-          printf 'Expected output:\n3\n20\n99\n0\n' > target/expected.txt
+          printf '3\n20\n99\n0\n' > target/expected.txt
           diff -u target/expected.txt target/native.txt
       - name: Out-of-range native accesses must fail
         shell: bash
