@@ -433,13 +433,19 @@ public class Interpreter {
         }
         if (s instanceof Ast.SetIndexStmt set) {
             Object target = resolve(set.name, env);
-            if (!(target instanceof List<?> list)) {
-                throw new RuntimeException("Variable '" + set.name + "' is not an array");
+            Object key = evalExpr(set.index, env);
+            // Dictionaries: string-keyed insert or update (new keys are added).
+            if (target instanceof OwRecord rec) {
+                rec.put(mapKey(key), evalExpr(set.value, env));
+                return;
             }
-            int index = toIndex(evalExpr(set.index, env));
-            checkBounds(index, list.size());
-            ((List<Object>) list).set(index, evalExpr(set.value, env));
-            return;
+            if (target instanceof List<?> list) {
+                int index = toIndex(key);
+                checkBounds(index, list.size());
+                ((List<Object>) list).set(index, evalExpr(set.value, env));
+                return;
+            }
+            throw new RuntimeException("Variable '" + set.name + "' is not an array or dictionary");
         }
         if (s instanceof Ast.SetFieldStmt set) {
             Object target = evalExpr(set.target, env);
@@ -586,12 +592,22 @@ public class Interpreter {
         }
         if (e instanceof Ast.IndexExpr idx) {
             Object target = evalExpr(idx.target, env);
-            int index = toIndex(evalExpr(idx.index, env));
-            if (!(target instanceof List<?> list)) {
-                throw new RuntimeException("Indexing requires an array");
+            Object key = evalExpr(idx.index, env);
+            // Dictionaries: string-keyed lookup. Missing keys raise a clear error;
+            // use map_get(dict, key, fallback) for a default instead.
+            if (target instanceof OwRecord rec) {
+                String k = mapKey(key);
+                if (!rec.containsKey(k)) {
+                    throw new RuntimeException("Dictionary has no key '" + k + "'");
+                }
+                return rec.get(k);
             }
-            checkBounds(index, list.size());
-            return list.get(index);
+            if (target instanceof List<?> list) {
+                int index = toIndex(key);
+                checkBounds(index, list.size());
+                return list.get(index);
+            }
+            throw new RuntimeException("Indexing requires an array or dictionary");
         }
         if (e instanceof Ast.FieldAccess fa) {
             // EnumName.Variant
@@ -1321,10 +1337,24 @@ public class Interpreter {
             "abs", "min", "max", "pow", "sqrt", "clamp",
             "floor", "round", "ceil",
             "sleep", "now_ms",
+            "map_get", "map_has", "map_set", "map_delete",
+            "map_keys", "map_values", "map_size",
             "pack", "unpack", "assert", "extension"
     ));
 
     private static boolean isBuiltin(String name) { return BUILTINS.contains(name); }
+
+    /** Dictionary keys are always strings; reject other key types with a clear error. */
+    private String mapKey(Object key) {
+        if (key instanceof String s) return s;
+        throw new RuntimeException("Dictionary keys must be strings, got " + formatValue(key));
+    }
+
+    /** Require a dictionary value, used by the map_* builtins. */
+    private OwRecord asRecord(Object value, String fn) {
+        if (value instanceof OwRecord rec) return rec;
+        throw new RuntimeException(fn + " expects a dictionary as its first argument, got " + formatValue(value));
+    }
 
     private Object evalBuiltin(Ast.CallExpr call, Map<String, Object> env) {
         return switch (call.name) {
@@ -1389,6 +1419,45 @@ public class Interpreter {
             case "round" -> { requireArgCount(call, 1); yield (int) Math.round(toDouble(evalExpr(call.args.get(0), env))); }
             case "sleep" -> builtinSleep(call, env);
             case "now_ms" -> { requireArgCount(call, 0); yield (int) (System.currentTimeMillis() - startMillis); }
+            case "map_get" -> {
+                requireArgCount(call, 3);
+                OwRecord m = asRecord(evalExpr(call.args.get(0), env), "map_get");
+                String k = mapKey(evalExpr(call.args.get(1), env));
+                // Fallback is only evaluated when the key is absent (lazy), and a
+                // present key wins even when its stored value is 0/false/""/null.
+                yield m.containsKey(k) ? m.get(k) : evalExpr(call.args.get(2), env);
+            }
+            case "map_has" -> {
+                requireArgCount(call, 2);
+                OwRecord m = asRecord(evalExpr(call.args.get(0), env), "map_has");
+                yield m.containsKey(mapKey(evalExpr(call.args.get(1), env)));
+            }
+            case "map_set" -> {
+                requireArgCount(call, 3);
+                OwRecord m = asRecord(evalExpr(call.args.get(0), env), "map_set");
+                m.put(mapKey(evalExpr(call.args.get(1), env)), evalExpr(call.args.get(2), env));
+                yield m;
+            }
+            case "map_delete" -> {
+                requireArgCount(call, 2);
+                OwRecord m = asRecord(evalExpr(call.args.get(0), env), "map_delete");
+                m.remove(mapKey(evalExpr(call.args.get(1), env)));
+                yield m;
+            }
+            case "map_keys" -> {
+                requireArgCount(call, 1);
+                OwRecord m = asRecord(evalExpr(call.args.get(0), env), "map_keys");
+                yield new ArrayList<Object>(m.keySet());
+            }
+            case "map_values" -> {
+                requireArgCount(call, 1);
+                OwRecord m = asRecord(evalExpr(call.args.get(0), env), "map_values");
+                yield new ArrayList<Object>(m.values());
+            }
+            case "map_size" -> {
+                requireArgCount(call, 1);
+                yield asRecord(evalExpr(call.args.get(0), env), "map_size").size();
+            }
             case "pack" -> builtinPack(call, env);
             case "unpack" -> builtinUnpack(call, env);
             case "assert" -> builtinAssert(call, env);

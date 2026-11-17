@@ -1,0 +1,34 @@
+# MobArt sprite mapping — a dictionary replaces a long switch statement.
+#
+# The old shape was one `switch name:` arm per mob, each returning a filename.
+# A dictionary collapses that to a single O(1) lookup, and map_get keeps the
+# Zombie fallback for any unknown mob.
+#
+# Run it (OwIDE "Run" or `owc --run mob_sprites.ow`).
+
+# name -> sprite path. String keys may contain spaces and punctuation.
+fn mob_sprites():
+  return: {
+    "Blaze": "hostile/blaze.gif",
+    "Magma Cube": "hostile/magmacube.png",
+    "Zombie": "hostile/zombie.png",
+    "Skeleton": "hostile/skeleton.png",
+    "Creeper": "hostile/creeper.png",
+    "Enderman": "hostile/enderman.png"
+  }
+
+# MobArt.path(name): one dictionary lookup, Zombie as the default sprite.
+fn mob_path(sprites, name):
+  return: map_get(sprites, name, "hostile/zombie.png")
+
+main:
+  set sprites: mob_sprites()
+  print: mob_path(sprites, "Blaze")         # hostile/blaze.gif
+  print: mob_path(sprites, "Magma Cube")    # hostile/magmacube.png  (key with a space)
+  print: mob_path(sprites, "Enderman")      # hostile/enderman.png
+  print: mob_path(sprites, "Herobrine")     # hostile/zombie.png     (unknown -> fallback)
+
+  # Dictionaries are first-class: pass them around, add keys at runtime.
+  set sprites["Witch"]: "hostile/witch.png"
+  print: mob_path(sprites, "Witch")         # hostile/witch.png
+  print: map_size(sprites)                  # 7

@@ -758,12 +758,20 @@ public class Parser {
         if (match(Type.LBRACE)) {
             List<String> keys = new ArrayList<>();
             List<Ast.Expr> values = new ArrayList<>();
+            // Dictionary/object literals may span multiple lines, so newlines
+            // after '{', around entries and before '}' are ignored.
+            consumeNewlines();
             if (!check(Type.RBRACE)) {
                 do {
-                    keys.add(expect(Type.IDENT).text);
+                    consumeNewlines();
+                    // Keys may be bare identifiers (object style) or quoted
+                    // strings, which allows spaces and punctuation in dict keys.
+                    keys.add(check(Type.STRING) ? expect(Type.STRING).text : expect(Type.IDENT).text);
                     expect(Type.COLON);
                     values.add(parseExpr());
+                    consumeNewlines();
                 } while (match(Type.COMMA));
+                consumeNewlines();
             }
             expect(Type.RBRACE);
             return new Ast.MapLit(keys, values);

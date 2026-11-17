@@ -55,6 +55,9 @@ public class Lexer {
         List<Token> out = new ArrayList<>();
         Deque<Integer> indents = new ArrayDeque<>();
         indents.push(0);
+        // Implicit line joining: while inside (), [] or {} the layout tokens
+        // (INDENT/DEDENT/NEWLINE) are suppressed so literals can span lines.
+        int bracketDepth = 0;
 
         for (int i = 0; i < lines.length; i++) {
             int lineNo = i + 1;
@@ -64,21 +67,24 @@ public class Lexer {
             if (stripped.trim().isEmpty()) continue;
 
             int leadingSpaces = countLeadingSpaces(line);
-            if (leadingSpaces % 2 != 0) {
-                throw err("Indentation must be a multiple of 2 spaces", lineNo);
-            }
-
-            int currentIndent = indents.peek();
-            if (leadingSpaces > currentIndent) {
-                indents.push(leadingSpaces);
-                out.add(new Token(Type.INDENT, "", lineNo));
-            } else if (leadingSpaces < currentIndent) {
-                while (indents.size() > 1 && leadingSpaces < indents.peek()) {
-                    indents.pop();
-                    out.add(new Token(Type.DEDENT, "", lineNo));
+            // Continuation lines inside brackets carry no block structure, so
+            // their indentation is ignored entirely.
+            if (bracketDepth == 0) {
+                if (leadingSpaces % 2 != 0) {
+                    throw err("Indentation must be a multiple of 2 spaces", lineNo);
                 }
-                if (leadingSpaces != indents.peek()) {
-                    throw err("Invalid dedent level", lineNo);
+                int currentIndent = indents.peek();
+                if (leadingSpaces > currentIndent) {
+                    indents.push(leadingSpaces);
+                    out.add(new Token(Type.INDENT, "", lineNo));
+                } else if (leadingSpaces < currentIndent) {
+                    while (indents.size() > 1 && leadingSpaces < indents.peek()) {
+                        indents.pop();
+                        out.add(new Token(Type.DEDENT, "", lineNo));
+                    }
+                    if (leadingSpaces != indents.peek()) {
+                        throw err("Invalid dedent level", lineNo);
+                    }
                 }
             }
 
@@ -107,7 +113,18 @@ public class Lexer {
                         leadingSpaces + start + 1, leadingSpaces + end + 1, sourceName));
                 cursor = end;
             }
-            out.add(new Token(Type.NEWLINE, "", lineNo));
+            // Track bracket nesting across this line, then only end the logical
+            // line (NEWLINE) when every bracket opened so far has closed.
+            for (int j = tokenStart; j < out.size(); j++) {
+                switch (out.get(j).type) {
+                    case LPAREN, LBRACKET, LBRACE -> bracketDepth++;
+                    case RPAREN, RBRACKET, RBRACE -> bracketDepth = Math.max(0, bracketDepth - 1);
+                    default -> {}
+                }
+            }
+            if (bracketDepth == 0) {
+                out.add(new Token(Type.NEWLINE, "", lineNo));
+            }
         }
 
         while (indents.size() > 1) {

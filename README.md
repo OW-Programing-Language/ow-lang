@@ -50,6 +50,10 @@ indentation + `key: value` YAML aesthetic.
 - **Booleans** — `true` / `false`.
 - **Builtins** — `input()`, `int()`, `str()`, `len()`, `array()`, `mod()`,
   `rand(n)`, `time_ms()`.
+- **Dictionaries (maps)** — `{ "Magma Cube": "x" }` literals, dynamic string-key
+  indexing `d[key]`, and `map_get`/`map_has`/`map_set`/`map_delete`/`map_keys`/
+  `map_values`/`map_size`. See [dictionaries](docs/dictionaries.md) and
+  [`examples/mob_sprites.ow`](examples/mob_sprites.ow).
 
 See [`examples/oop_demo.ow`](examples/oop_demo.ow) for a tour of all of the above.
 
