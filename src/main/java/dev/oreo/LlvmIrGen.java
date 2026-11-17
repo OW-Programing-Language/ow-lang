@@ -240,7 +240,7 @@ public class LlvmIrGen {
             // A future native runtime will own reclamation; LLVM does not
             // currently lower arrays across function boundaries.
             int count = a.elements.size();
-            Value storage = allocatedArrayData(Integer.toString(count), Integer.toString(count));
+            Value storage = allocatedArrayData(count);
             for (int i = 0; i < count; i++) {
                 Value element = genExpr(a.elements.get(i));
                 if (!element.type.equals("i32")) {
@@ -352,10 +352,10 @@ public class LlvmIrGen {
      * calloc(0,4) behavior. Allocation failure terminates rather than
      * performing a null dereference.
      */
-    private Value allocatedArrayData(String count, String allocationCount) {
+    private Value allocatedArrayData(int count) {
         String raw = newTemp();
         body.append("  ").append(raw).append(" = call i8* @calloc(i64 ")
-                .append(allocationCount.equals("0") ? "1" : allocationCount)
+                .append(Math.max(1, count))
                 .append(", i64 4)\n");
         String ok = newTemp();
         body.append("  ").append(ok).append(" = icmp ne i8* ").append(raw).append(", null\n");
