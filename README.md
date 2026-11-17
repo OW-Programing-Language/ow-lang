@@ -78,10 +78,11 @@ The native backend now handles integer-array literals, `len(array)`, checked
 array indexing and indexed assignment, including shared array aliases.
 Run `ow llvm examples/native_arrays.ow` or build the example natively.
 **This remains experimental:** the native integer-array subset uses
-reference counting, but nested arrays, object memory management and native
-array function parameters/returns are not supported. See
+reference counting, and explicitly typed native array function parameters/returns,
+but nested arrays and object memory management are not supported. See
 [native arrays and limitations](docs/native-arrays.md) and
-[native array reference counting](docs/native-array-memory.md).
+[native array reference counting](docs/native-array-memory.md), and
+[typed native array functions](docs/native-array-functions.md).
 
 ## Language features
 
