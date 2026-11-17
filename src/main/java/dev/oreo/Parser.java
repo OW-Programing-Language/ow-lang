@@ -31,6 +31,10 @@ public class Parser {
             if (matchIdent("import")) {
                 imports.add(expect(Type.STRING).text);
                 if (check(Type.NEWLINE)) p++;
+            } else if (check(Type.AT)) {
+                List<String> annotations = parseAnnotations();
+                if (!matchIdent("fn")) throw err("Test annotation must precede a function");
+                fns.add(parseFnDecl(annotations));
             } else if (matchIdent("fn")) {
                 fns.add(parseFnDecl());
             } else if (matchIdent("enum")) {
@@ -74,11 +78,30 @@ public class Parser {
                                moduleAliases, mainBody);
     }
 
+    private List<String> parseAnnotations() {
+        List<String> annotations = new ArrayList<>();
+        while (match(Type.AT)) {
+            String annotation = expect(Type.IDENT).text;
+            if (!Set.of("Test", "BeforeEach", "AfterEach").contains(annotation))
+                throw err("Unsupported test annotation @" + annotation);
+            if (!annotations.isEmpty())
+                throw err("Only one test annotation per function is supported");
+            annotations.add(annotation);
+            expect(Type.NEWLINE);
+            consumeNewlines();
+        }
+        return annotations;
+    }
+
     private Ast.FnDecl parseFnDecl() {
+        return parseFnDecl(List.of());
+    }
+
+    private Ast.FnDecl parseFnDecl(List<String> annotations) {
         String name = expect(Type.IDENT).text;
         List<String> params = parseParamList();
         List<Ast.Stmt> body = parseBlockHeaderless();
-        return new Ast.FnDecl(name, params, body);
+        return new Ast.FnDecl(name, params, body, annotations);
     }
 
     private List<String> parseParamList() {
@@ -347,10 +370,14 @@ public class Parser {
             if (check(Type.NEWLINE)) { p++; continue; }
             if (matchIdent("field")) {
                 fields.add(parseField());
+            } else if (check(Type.AT)) {
+                List<String> annotations = parseAnnotations();
+                if (!matchIdent("fn")) throw err("Test annotation must precede a method");
+                methods.add(parseMethod(annotations));
             } else if (matchIdent("fn")) {
                 methods.add(parseMethod());
             } else {
-                throw err("class body expects 'field' or 'fn', got "
+                throw err("class body expects 'field', 'fn' or test annotation, got "
                         + peek().type + (peek().type == Type.IDENT ? "(" + peek().text + ")" : ""));
             }
         }
@@ -374,13 +401,17 @@ public class Parser {
     }
 
     private Ast.MethodDecl parseMethod() {
+        return parseMethod(List.of());
+    }
+
+    private Ast.MethodDecl parseMethod(List<String> annotations) {
         boolean isPrivate = parseVisibility();
         Lexer.Token nameToken = expect(Type.IDENT);
         ParamSpec params = parseTypedParamList();
         String returnType = parseReturnType();
         List<Ast.Stmt> body = parseBlockHeaderless();
         return new Ast.MethodDecl(nameToken.text, isPrivate, params.names, params.types,
-                                  returnType, body, Ast.SourceSpan.from(nameToken));
+                                  returnType, body, Ast.SourceSpan.from(nameToken), annotations);
     }
 
     private record ParamSpec(List<String> names, List<String> types) {}
@@ -491,6 +522,12 @@ public class Parser {
         if (matchIdent("try")) {
             return parseTry();
         }
+        if (matchIdent("throw")) {
+            expect(Type.COLON);
+            Ast.Expr value = parseExpr();
+            expect(Type.NEWLINE);
+            return new Ast.ThrowStmt(value);
+        }
         if (matchIdent("save")) {
             String model = expect(Type.IDENT).text;
             expect(Type.COLON);
@@ -567,15 +604,20 @@ public class Parser {
         return new Ast.SetStmt(name, typeName, value, Ast.SourceSpan.from(nameToken));
     }
 
-    // try: <block> catch <name>: <block>
+    // try: <block> [catch <name>: <block>] [finally: <block>]
     private Ast.Stmt parseTry() {
         List<Ast.Stmt> tryBody = parseBlockHeaderless();
-        if (!matchIdent("catch")) {
-            throw err("'try:' must be followed by 'catch <name>:'");
+        String name = null;
+        List<Ast.Stmt> catchBody = null;
+        if (matchIdent("catch")) {
+            name = expect(Type.IDENT).text;
+            catchBody = parseBlockHeaderless();
         }
-        String name = expect(Type.IDENT).text;
-        List<Ast.Stmt> catchBody = parseBlockHeaderless();
-        return new Ast.TryStmt(tryBody, name, catchBody);
+        List<Ast.Stmt> finallyBody = null;
+        if (matchIdent("finally")) finallyBody = parseBlockHeaderless();
+        if (catchBody == null && finallyBody == null)
+            throw err("'try:' requires 'catch <name>:' and/or 'finally:'");
+        return new Ast.TryStmt(tryBody, name, catchBody, finallyBody);
     }
 
     private Ast.IfStmt parseIf() {
