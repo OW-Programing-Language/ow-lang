@@ -18,6 +18,7 @@ public final class Loader {
 
     public static Ast.Program load(Path entry) throws IOException {
         Path root = entry.toAbsolutePath().normalize();
+        Map<String, Path> aliases = DependencyManager.forEntry(root);
 
         List<Ast.FnDecl> fns = new ArrayList<>();
         List<Ast.EnumDecl> enums = new ArrayList<>();
@@ -32,7 +33,7 @@ public final class Loader {
 
         Set<Path> visited = new HashSet<>();
         Deque<Path> active = new ArrayDeque<>();
-        List<Ast.Stmt> mainBody = collect(root, visited, fns, enums, interfaces, classes, models, moduleTypes, modules, functors, functorTypes, moduleAliases, active, true);
+        List<Ast.Stmt> mainBody = collect(root, visited, fns, enums, interfaces, classes, models, moduleTypes, modules, functors, functorTypes, moduleAliases, active, true, aliases);
 
         if (mainBody == null) {
             throw new RuntimeException("Program is missing a 'main:' block (entry file: " + root + ")");
@@ -55,15 +56,16 @@ public final class Loader {
         List<Ast.FunctorTypeDecl> functorTypes = new ArrayList<>();
         List<Ast.ModuleAliasDecl> moduleAliases = new ArrayList<>();
 
+        Map<String, Path> aliases = DependencyManager.forEntry(baseDir);
         Ast.Program entry = new Parser(new Lexer(src,
                 baseDir.resolve("<editor-buffer>").toString()).lexAll()).parseProgram();
         Set<Path> visited = new HashSet<>();
         Deque<Path> active = new ArrayDeque<>();
         for (String imp : entry.imports) {
-            Path target = baseDir.resolve(imp).normalize();
+            Path source = baseDir.resolve("<editor-buffer>");
+            Path target = DependencyManager.resolveImport(source, imp, aliases);
             int line = sourceImportLine(src, imp);
             int column = sourceImportColumn(src, imp);
-            Path source = baseDir.resolve("<editor-buffer>");
             if (!Files.exists(target)) {
                 throw new RuntimeException(source + ":" + line + ":" + column +
                         ": import not found: \"" + imp + "\"");
@@ -73,7 +75,7 @@ public final class Loader {
                 throw new RuntimeException(source + ":" + line + ":" + column +
                         ": Import cycle: " + active + " -> " + target);
             }
-            collect(target, visited, fns, enums, interfaces, classes, models, moduleTypes, modules, functors, functorTypes, moduleAliases, active, false);
+            collect(target, visited, fns, enums, interfaces, classes, models, moduleTypes, modules, functors, functorTypes, moduleAliases, active, false, aliases);
         }
         fns.addAll(entry.functions);
         enums.addAll(entry.enums);
@@ -102,7 +104,8 @@ public final class Loader {
                                            List<Ast.FunctorDecl> functors,
                                            List<Ast.FunctorTypeDecl> functorTypes,
                                            List<Ast.ModuleAliasDecl> moduleAliases, Deque<Path> active,
-                                           boolean isEntry) throws IOException {
+                                           boolean isEntry,
+                                           Map<String, Path> aliases) throws IOException {
         Path norm = file.toAbsolutePath().normalize();
         if (active.contains(norm)) {
             throw new RuntimeException("Import cycle: " + active + " -> " + norm);
@@ -115,7 +118,7 @@ public final class Loader {
 
         // Load imports first (depth-first), resolved relative to this file.
         for (String imp : prog.imports) {
-            Path target = norm.getParent().resolve(imp).normalize();
+            Path target = DependencyManager.resolveImport(norm, imp, aliases);
             int line = sourceImportLine(src, imp);
             int column = sourceImportColumn(src, imp);
             if (!Files.exists(target)) {
@@ -127,7 +130,7 @@ public final class Loader {
                 throw new RuntimeException(norm + ":" + line + ":" + column +
                         ": Import cycle: " + active + " -> " + target);
             }
-            collect(target, visited, fns, enums, interfaces, classes, models, moduleTypes, modules, functors, functorTypes, moduleAliases, active, false);
+            collect(target, visited, fns, enums, interfaces, classes, models, moduleTypes, modules, functors, functorTypes, moduleAliases, active, false, aliases);
         }
 
         fns.addAll(prog.functions);

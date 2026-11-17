@@ -1,0 +1,10 @@
+# Run from the repository root:
+# ow deps install examples/dependencies-demo
+# ow run examples/dependencies-demo/main.ow
+import "@math/src/MathQuestions.ow"
+
+main:
+  set generator: new MathQuestions()
+  set q: generator.generate_any(["+", "-", "*", "/"], 1, 12)
+  print: q.prompt
+  print: generator.choices(q, 4)

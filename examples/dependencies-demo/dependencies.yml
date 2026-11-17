@@ -1,0 +1,10 @@
+format: 1
+repositories:
+  - id: github
+    url: https://github.com
+
+dependencies:
+  - name: math
+    repository: github
+    path: OW-Programing-Language/ow-math-questions
+    version: c22d01cfee6be18d96d4c55b95b7e79892bca9f6
