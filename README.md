@@ -23,11 +23,11 @@ main:
 ## OW project dependencies (dependencies.yml)
 
 OW projects can declare versioned source libraries in a **project-root
-\`dependencies.yml\`**, much like Maven's dependency declarations, but using YAML.
+`dependencies.yml`**, much like Maven's dependency declarations, but using YAML.
 Repositories can be listed separately from libraries; each library receives an
 explicit import alias and a locked Git commit.
 
-\`\`\`yaml
+```yaml
 format: 1
 repositories:
   - id: github
@@ -37,18 +37,18 @@ dependencies:
     repository: github
     path: OW-Programing-Language/ow-math-questions
     version: c22d01cfee6be18d96d4c55b95b7e79892bca9f6
-\`\`\`
+```
 
-\`\`\`ow
+```ow
 import "@math/src/MathQuestions.ow"
 
 main:
   set math: new MathQuestions()
   print: math.generate("+", 1, 10).prompt
-\`\`\`
+```
 
-Use \`ow deps init\`, \`ow deps install\`, \`ow deps list\`, and
-\`ow deps update\`. The \`run\`, \`check\`, \`llvm\`, \`build\`, and \`package\`
+Use `ow deps init`, `ow deps install`, `ow deps list`, and
+`ow deps update`. The `run`, `check`, `llvm`, `build`, and `package`
 commands automatically resolve the project manifest. Existing programs
 without a manifest keep working as before.
 
