@@ -35,6 +35,9 @@ public class LlvmIrGen {
         strCount = 0;
         functionNames.clear();
         for (Ast.FnDecl fn : program.functions) {
+            if (fn.name.startsWith("__ow_native_array_")) {
+                throw new RuntimeException("LLVM backend: reserved native runtime function name: " + fn.name);
+            }
             if (!functionNames.add(fn.name)) {
                 throw new RuntimeException("Duplicate function: " + fn.name);
             }
@@ -238,7 +241,9 @@ public class LlvmIrGen {
         }
 
         if (st instanceof Ast.CallStmt c) {
-            genExpr(c.call);
+            Value result = genExpr(c.call);
+            // An unassigned array(...) expression owns a temporary reference.
+            if (result.owned) releaseArray(result);
             return;
         }
 
