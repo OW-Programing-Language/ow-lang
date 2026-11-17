@@ -130,7 +130,7 @@ public final class Loader {
                 throw new RuntimeException(norm + ":" + line + ":" + column +
                         ": Import cycle: " + active + " -> " + target);
             }
-            collect(target, visited, fns, enums, interfaces, classes, models, moduleTypes, modules, functors, functorTypes, moduleAliases, active, false);
+            collect(target, visited, fns, enums, interfaces, classes, models, moduleTypes, modules, functors, functorTypes, moduleAliases, active, false, aliases);
         }
 
         fns.addAll(prog.functions);
