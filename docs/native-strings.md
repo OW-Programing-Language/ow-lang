@@ -1,8 +1,10 @@
 # Native OW UTF-8 string subset (experimental)
 
-OW's LLVM backend now supports **immutable UTF-8 strings** in native
-function signatures, `==` / `!=` content comparison, and `len` with
-OW-compatible Java-style UTF-16 code-unit counting.
+OW's LLVM backend supports **UTF-8 strings** in native function signatures,
+`==` / `!=` content comparison, and `len` with OW-compatible Java-style
+UTF-16 code-unit counting. It also supports dynamic `string + string`
+concatenation and reference-counted heap-backed strings. See
+[native dynamic strings](native-dynamic-strings.md) for ownership details.
 
 ```ow
 fn identity(value string) -> string:
@@ -21,27 +23,29 @@ for interpreter/native output parity.
 
 ## Implementation
 
-- String constants are encoded as UTF-8 zero-terminated immutable globals,
-  represented as LLVM `i8*`.
+- String constants are encoded as UTF-8 zero-terminated immutable globals.
+  Native string values use `%ow.string = {i8* data, i32* refs}`:
+  static literals have a null refcount pointer, dynamically concatenated
+  values have allocated refcounts.
 - Native functions accept `fn identity(value string) -> string:`.
   The compiler validates argument and return types.
 - Comparisons call libc `strcmp`, which compares the **contents**, not
   the addresses, of the strings.
 - The generated LLVM UTF-8 scanner counts UTF-16 code units for valid,
   null-terminated UTF-8 source strings.
-- No heap allocation or string ownership mechanism is needed for this
-  first immutable-literal-only subset; string values may be passed between
-  native functions and stored in local variables.
+- Dynamically concatenated strings use checked allocation and
+  reference counting, so local variables, aliases, nested temporaries,
+  and function returns release allocations when no longer owned.
 
 ## Limitations
 
-- **No dynamic string concatenation, string builders, input strings or string
-  arrays yet.** A later milestone must introduce a length-aware owned string
-  representation and memory management, then extend it to collection elements.
+- **Dynamic `string + string` is supported**, but native string builders,
+  input strings, string arrays and dictionaries are not supported yet.
+  A length-aware string representation is still planned.
 - Embedded NUL characters are rejected by the compiler because C-string
   `strcmp` and the scanner would otherwise silently truncate the value.
-- Strings are immutable and originate from source literals or functions
-  forwarding them. External foreign pointers and invalid UTF-8 are outside
+- Strings are immutable. They can originate from source literals or dynamic
+  concatenation. External foreign pointers and invalid UTF-8 are outside
   the supported subset.
 - Native string `==` and `!=` support string-to-string comparisons only.
   Mixed-type string/number comparisons are not yet available; the interpreter
