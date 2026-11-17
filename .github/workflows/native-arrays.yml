@@ -41,7 +41,7 @@ jobs:
           java -jar target/OwIDE.jar run examples/native_dynamic_arrays.ow > target/dynamic-interpreted.txt
           ./target/native-dynamic-arrays > target/dynamic-native.txt
           diff -u target/dynamic-interpreted.txt target/dynamic-native.txt
-          printf '4\\n6\\n42\\n0\\n' > target/dynamic-expected.txt
+          printf '4\n6\n42\n0\n' > target/dynamic-expected.txt
           diff -u target/dynamic-expected.txt target/dynamic-native.txt
       - name: Reject negative runtime-sized array lengths
         shell: bash
