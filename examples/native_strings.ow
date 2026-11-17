@@ -1,0 +1,21 @@
+# Native immutable UTF-8 string values and OW-compatible length.
+fn identity(value string) -> string:
+  return: value
+
+fn areSame(left string, right string) -> int:
+  if: left == right
+    return: 1
+  return: 0
+
+main:
+  set greeting: "bonjour"
+  set echoed: identity(greeting)
+  print: echoed
+  print: areSame(echoed, "bonjour")
+  print: areSame(echoed, "salut")
+
+  print: len("été")
+  print: len("hé🙂")
+  print: len("")
+  if: echoed != "salut"
+    print: 42
