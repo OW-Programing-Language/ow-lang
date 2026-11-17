@@ -99,20 +99,14 @@ public class Parser {
 
     private Ast.FnDecl parseFnDecl(List<String> annotations) {
         String name = expect(Type.IDENT).text;
-        List<String> params = parseParamList();
+        // Reuse the method-signature syntax for top-level functions:
+        // fn identity(values array) -> array:
+        // Legacy untyped fn name(a, b): syntax continues to parse unchanged.
+        ParamSpec params = parseTypedParamList();
+        String returnType = parseReturnType();
         List<Ast.Stmt> body = parseBlockHeaderless();
-        return new Ast.FnDecl(name, params, body, annotations);
-    }
-
-    private List<String> parseParamList() {
-        expect(Type.LPAREN);
-        List<String> params = new ArrayList<>();
-        if (!check(Type.RPAREN)) {
-            params.add(expect(Type.IDENT).text);
-            while (match(Type.COMMA)) params.add(expect(Type.IDENT).text);
-        }
-        expect(Type.RPAREN);
-        return params;
+        return new Ast.FnDecl(name, params.names, body, annotations,
+                              params.types, returnType);
     }
 
     // enum Name:
