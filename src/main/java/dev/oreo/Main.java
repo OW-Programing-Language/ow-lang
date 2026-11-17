@@ -2,6 +2,9 @@ package dev.oreo;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.stream.Stream;
 
 public class Main {
 
@@ -20,6 +23,30 @@ public class Main {
             case "run", "--run" -> {
                 requireFile(args, "run");
                 runFile(Path.of(args[1]));
+            }
+
+            case "test" -> {
+                requireFile(args, "test");
+                Path target = Path.of(args[1]);
+                List<Path> tests = new ArrayList<>();
+                if (Files.isDirectory(target)) {
+                    try (Stream<Path> walk = Files.walk(target)) {
+                        walk.filter(Files::isRegularFile)
+                            .filter(p -> p.getFileName().toString().endsWith("Test.ow")
+                                      || p.getFileName().toString().endsWith("_test.ow"))
+                            .sorted().forEach(tests::add);
+                    }
+                } else tests.add(target);
+                if (tests.isEmpty()) {
+                    System.err.println("No OW tests found in " + target);
+                    System.exit(1);
+                }
+                int failures = 0;
+                for (Path file : tests) {
+                    System.out.println("Running OW tests: " + file);
+                    failures += new Interpreter(System.out).runTests(Loader.loadTests(file));
+                }
+                if (failures > 0) System.exit(1);
             }
 
             case "check", "--check" -> {
@@ -116,6 +143,7 @@ public class Main {
                   ow <file.ow>          Run a program (interpreter)
                   ow run <file.ow>      Run a program (interpreter)
                   ow check <file.ow>    Validate module/functor types without executing main
+                  ow test <file|dir>    Run annotated OW tests (@Test / lifecycle hooks)
                   ow llvm <file> [out]  Generate LLVM IR for the i32/static-module subset
                   ow build <file> [out] Compile supported OW programs (needs LLVM/Zig)
                   ow deps init [dir]      Create a project dependencies.yml

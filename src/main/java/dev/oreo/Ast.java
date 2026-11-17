@@ -306,10 +306,15 @@ public class Ast {
         public final String name;
         public final List<String> params;
         public final List<Stmt> body;
+        public final List<String> annotations;
         public FnDecl(String name, List<String> params, List<Stmt> body) {
+            this(name, params, body, List.of());
+        }
+        public FnDecl(String name, List<String> params, List<Stmt> body, List<String> annotations) {
             this.name = name;
             this.params = params;
             this.body = body;
+            this.annotations = List.copyOf(annotations);
         }
     }
 
@@ -377,6 +382,7 @@ public class Ast {
         public final String returnType;
         public final List<Stmt> body;
         public final SourceSpan span;
+        public final List<String> annotations;
         public MethodDecl(String name, boolean isPrivate, List<String> params, List<Stmt> body) {
             this(name, isPrivate, params, Collections.nCopies(params.size(), null), null, body);
         }
@@ -387,6 +393,11 @@ public class Ast {
         public MethodDecl(String name, boolean isPrivate, List<String> params,
                           List<String> paramTypes, String returnType, List<Stmt> body,
                           SourceSpan span) {
+            this(name, isPrivate, params, paramTypes, returnType, body, span, List.of());
+        }
+        public MethodDecl(String name, boolean isPrivate, List<String> params,
+                          List<String> paramTypes, String returnType, List<Stmt> body,
+                          SourceSpan span, List<String> annotations) {
             this.name = name;
             this.isPrivate = isPrivate;
             this.params = params;
@@ -394,6 +405,7 @@ public class Ast {
             this.returnType = returnType;
             this.body = body;
             this.span = span;
+            this.annotations = List.copyOf(annotations);
         }
     }
 
@@ -483,11 +495,22 @@ public class Ast {
         public final List<Stmt> tryBody;
         public final String catchName;
         public final List<Stmt> catchBody;
+        public final List<Stmt> finallyBody;
         public TryStmt(List<Stmt> tryBody, String catchName, List<Stmt> catchBody) {
+            this(tryBody, catchName, catchBody, null);
+        }
+        public TryStmt(List<Stmt> tryBody, String catchName, List<Stmt> catchBody,
+                       List<Stmt> finallyBody) {
             this.tryBody = tryBody;
             this.catchName = catchName;
             this.catchBody = catchBody;
+            this.finallyBody = finallyBody;
         }
+    }
+
+    public static class ThrowStmt implements Stmt {
+        public final Expr value;
+        public ThrowStmt(Expr value) { this.value = value; }
     }
 
     public static class CaseClause {

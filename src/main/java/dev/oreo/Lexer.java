@@ -6,7 +6,7 @@ public class Lexer {
 
     public enum Type {
         IDENT, INT, FLOAT, STRING,
-        COLON, COMMA, DOT, NEWLINE,
+        COLON, COMMA, DOT, AT, NEWLINE,
         INDENT, DEDENT,
         PLUS, MINUS, STAR, SLASH,
         LPAREN, RPAREN, LBRACKET, RBRACKET, LBRACE, RBRACE,
@@ -157,6 +157,7 @@ public class Lexer {
                 case ':': out.add(new Token(Type.COLON,  ":", lineNo)); p++; continue;
                 case ',': out.add(new Token(Type.COMMA,  ",", lineNo)); p++; continue;
                 case '.': out.add(new Token(Type.DOT,    ".", lineNo)); p++; continue;
+                case '@': out.add(new Token(Type.AT,     "@", lineNo)); p++; continue;
                 case '+': out.add(new Token(Type.PLUS,   "+", lineNo)); p++; continue;
                 case '-': out.add(new Token(Type.MINUS,  "-", lineNo)); p++; continue;
                 case '*': out.add(new Token(Type.STAR,   "*", lineNo)); p++; continue;

@@ -1,0 +1,32 @@
+name: OWUnit integration
+on:
+  push:
+    paths:
+      - 'src/**'
+      - 'examples/owunit/**'
+      - 'docs/testing-and-exceptions.md'
+      - 'pom.xml'
+      - '.github/workflows/owunit.yml'
+  pull_request:
+
+jobs:
+  owunit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: Build and run Java regression tests
+        run: mvn -B clean test package
+      - name: Run native OW annotated tests
+        run: java -jar target/OwIDE.jar test examples/owunit/CalculatorTest.ow
+      - name: Checkout OWUnit library
+        uses: actions/checkout@v4
+        with:
+          repository: OW-Programing-Language/OWUnit
+          path: integration/OWUnit
+      - name: Execute OWUnit library tests
+        run: java -jar target/OwIDE.jar test integration/OWUnit/tests

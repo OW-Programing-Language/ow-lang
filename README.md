@@ -55,6 +55,23 @@ without a manifest keep working as before.
 See [OW dependencies documentation](docs/dependencies.md) for the manifest
 schema, aliases, lockfile, offline cache, and current limitations.
 
+## Native OW testing and exceptions
+
+OW now supports `@Test`, `@BeforeEach` and `@AfterEach` annotations on
+functions and class methods. Run tests without a `main:` entrypoint:
+
+```sh
+ow test examples/owunit/CalculatorTest.ow
+ow test tests/
+```
+
+Use `throw: "message"` and `try` / `catch error` / `finally` for
+structured exception handling. Failed `assert(...)` calls raise catchable
+runtime exceptions. The native OWUnit assertions library lives at
+[OWUnit](https://github.com/OW-Programing-Language/OWUnit). See
+[testing and exceptions](docs/testing-and-exceptions.md) for details and
+interpreter-only limitations.
+
 ## Language features
 
 Ow is now a fully object-oriented language while keeping its clean,
