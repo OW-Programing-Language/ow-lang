@@ -22,7 +22,7 @@ main:
   call: array(3, 7)
 
   set i: 0
-  while i < 20:
+  while: i < 20
     set rotating: array(5, i)
     set i: i + 1
   print: rotating[3]
@@ -31,6 +31,6 @@ main:
   print: other[2]
 
   print: localValue()
-  if false:
+  if: false
     set unused: [0, 0]
   print: len(array(0, 0))
