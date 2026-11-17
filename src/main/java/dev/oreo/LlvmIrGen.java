@@ -56,6 +56,7 @@ public class LlvmIrGen {
         StringBuilder out = new StringBuilder();
         out.append("; ModuleID = '").append(moduleName).append("'\n");
         out.append("declare i32 @printf(i8*, ...)\n");
+        out.append("declare i32 @strcmp(i8*, i8*)\n");
         // A native integer array has length, shared backing storage and
         // reference-count pointer. The interpreter remains the full reference
         // semantics implementation; this ARC subset only covers i32 arrays.
@@ -68,6 +69,7 @@ public class LlvmIrGen {
         out.append(globals);
         out.append('\n');
         out.append(nativeArrayHelpers());
+        out.append(nativeStringHelpers());
         out.append(fnsCode);
         return out.toString();
     }
@@ -89,9 +91,9 @@ public class LlvmIrGen {
         localTypes = new LinkedHashMap<>();
         currentReturnType = llvmType(fn.returnType);
 
-        if (currentReturnType.equals("%ow.array") &&
+        if ((currentReturnType.equals("%ow.array") || currentReturnType.equals("i8*")) &&
             (fn.body.isEmpty() || !(fn.body.get(fn.body.size() - 1) instanceof Ast.ReturnStmt))) {
-            throw new RuntimeException("LLVM backend: array-returning function '" + fn.name
+            throw new RuntimeException("LLVM backend: array/string-returning function '" + fn.name
                     + "' must end with an explicit return");
         }
 
@@ -116,7 +118,8 @@ public class LlvmIrGen {
             if (type.equals("%ow.array")) {
                 entryAllocs.append("  ").append(ptr).append(" = alloca %ow.array\n");
             } else {
-                body.append("  ").append(ptr).append(" = alloca i32\n");
+                body.append("  ").append(ptr).append(" = alloca ")
+                        .append(type).append("\n");
             }
             // Caller transfers an owned reference into every array parameter.
             // Callee releases the parameter on any return, including the
@@ -131,6 +134,8 @@ public class LlvmIrGen {
             // This return is in the unreachable after.return block when the
             // final source statement is an explicit return.
             body.append("  ret %ow.array zeroinitializer\n");
+        } else if (currentReturnType.equals("i8*")) {
+            body.append("  ret i8* null\n");
         } else {
             body.append("  ret i32 0\n");
         }
@@ -377,8 +382,26 @@ public class LlvmIrGen {
         if (e instanceof Ast.Compare c) {
             Value l = genExpr(c.left);
             Value r = genExpr(c.right);
+            if (l.type.equals("i8*") && r.type.equals("i8*")) {
+                // Compare contents, not pointer identity. Immutable native
+                // strings are UTF-8; byte equality matches Java String.equals
+                // for valid UTF-8 (embedded NUL is explicitly rejected).
+                if (!c.op.equals("==") && !c.op.equals("!=")) {
+                    throw new RuntimeException(
+                            "LLVM backend: only == and != are supported for native strings");
+                }
+                String compared = newTemp();
+                body.append("  ").append(compared)
+                        .append(" = call i32 @strcmp(i8* ").append(l.ref)
+                        .append(", i8* ").append(r.ref).append(")\n");
+                String result = newTemp();
+                body.append("  ").append(result).append(" = icmp ")
+                        .append(c.op.equals("==") ? "eq" : "ne")
+                        .append(" i32 ").append(compared).append(", 0\n");
+                return new Value(result, "i1");
+            }
             if (!l.type.equals("i32") || !r.type.equals("i32")) {
-                throw new RuntimeException("LLVM backend: comparisons require integers");
+                throw new RuntimeException("LLVM backend: comparisons require two integers or two strings");
             }
             String pred = switch (c.op) {
                 case "==" -> "eq";
@@ -399,8 +422,15 @@ public class LlvmIrGen {
                 if (call.args.size() != 1)
                     throw new RuntimeException("LLVM backend: len expects one argument");
                 Value array = genExpr(call.args.get(0));
+                if (array.type.equals("i8*")) {
+                    String length = newTemp();
+                    body.append("  ").append(length)
+                            .append(" = call i32 @__ow_native_string_utf16len(i8* ")
+                            .append(array.ref).append(")\n");
+                    return new Value(length, "i32");
+                }
                 if (!array.type.equals("%ow.array"))
-                    throw new RuntimeException("LLVM backend: len currently supports only integer arrays");
+                    throw new RuntimeException("LLVM backend: len currently supports integer arrays and strings");
                 String length = newTemp();
                 body.append("  ").append(length).append(" = extractvalue %ow.array ")
                         .append(array.ref).append(", 0\n");
@@ -699,6 +729,42 @@ public class LlvmIrGen {
                 """;
     }
 
+    /**
+     * OW's interpreter uses Java String.length(), which counts UTF-16 code
+     * units. Count UTF-8 leading bytes, adding 2 for a 4-byte codepoint and
+     * 1 for other starts, while skipping continuation bytes. Since strings
+     * here originate from Java-encoded source literals (not arbitrary input),
+     * this operates on well-formed UTF-8 and preserves non-BMP length = 2.
+     */
+    private static String nativeStringHelpers() {
+        return """
+                define i32 @__ow_native_string_utf16len(i8* %text) {
+                entry:
+                  br label %loop
+                loop:
+                  %cursor = phi i8* [ %text, %entry ], [ %next, %body ]
+                  %length = phi i32 [ 0, %entry ], [ %advanced, %body ]
+                  %byte = load i8, i8* %cursor
+                  %finished = icmp eq i8 %byte, 0
+                  br i1 %finished, label %exit, label %body
+                body:
+                  %unsigned = zext i8 %byte to i32
+                  %maskedContinuation = and i32 %unsigned, 192
+                  %continuation = icmp eq i32 %maskedContinuation, 128
+                  %maskedFourByte = and i32 %unsigned, 248
+                  %fourByte = icmp eq i32 %maskedFourByte, 240
+                  %unitsForStart = select i1 %fourByte, i32 2, i32 1
+                  %units = select i1 %continuation, i32 0, i32 %unitsForStart
+                  %advanced = add i32 %length, %units
+                  %next = getelementptr i8, i8* %cursor, i64 1
+                  br label %loop
+                exit:
+                  ret i32 %length
+                }
+
+                """;
+    }
+
     /** Native subset supports int/bool scalars and explicitly annotated
      * integer arrays; other source types must not silently lower to i32.
      */
@@ -709,11 +775,19 @@ public class LlvmIrGen {
         if (declaredType.equals("array") || declaredType.equals("list")) {
             return "%ow.array";
         }
+        if (declaredType.equals("string")) {
+            return "i8*";
+        }
         throw new RuntimeException("LLVM backend: unsupported native function type '"
-                + declaredType + "' (supported: int, bool, array)");
+                + declaredType + "' (supported: int, bool, array, string)");
     }
 
     private String emitStringLiteral(String s) {
+        // C-string representation is intentionally narrow until OW introduces
+        // a length-aware owned string runtime. NUL would truncate strcmp/len.
+        if (s.indexOf('\u0000') >= 0) {
+            throw new RuntimeException("LLVM backend: embedded NUL in native strings is not supported yet");
+        }
         int id = strCount++;
         String name = "@.str." + id;
         byte[] bytes = s.getBytes(StandardCharsets.UTF_8);

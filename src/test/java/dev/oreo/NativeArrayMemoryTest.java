@@ -100,8 +100,9 @@ public class NativeArrayMemoryTest {
                 main:
                   print: consume()
                 """);
-        int ret = llvm.indexOf("ret i32 %");
-        int release = llvm.indexOf("call void @__ow_native_array_release(%ow.array");
+        int functionStart = llvm.indexOf("define i32 @consume(");
+        int ret = llvm.indexOf("ret i32 %", functionStart);
+        int release = llvm.indexOf("call void @__ow_native_array_release(%ow.array", functionStart);
         assertTrue(release > 0 && release < ret);
     }
 

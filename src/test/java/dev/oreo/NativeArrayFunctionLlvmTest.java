@@ -137,7 +137,7 @@ public class NativeArrayFunctionLlvmTest {
 
     @Test public void unsupportedFunctionTypeFailsExplicitly() {
         RuntimeException e = assertThrows(RuntimeException.class, () -> ir("""
-                fn unsupported(value string) -> int:
+                fn unsupported(value float) -> int:
                   return: 1
                 main:
                   print: 0
