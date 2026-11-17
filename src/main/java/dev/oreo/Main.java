@@ -55,6 +55,8 @@ public class Main {
                 packageApp(args);
             }
 
+            case "deps" -> DependencyManager.command(args);
+
             case "version", "--version", "-v" -> System.out.println("ow " + VERSION);
 
             case "help", "--help", "-h" -> printUsage();
@@ -116,6 +118,10 @@ public class Main {
                   ow check <file.ow>    Validate module/functor types without executing main
                   ow llvm <file> [out]  Generate LLVM IR for the i32/static-module subset
                   ow build <file> [out] Compile supported OW programs (needs LLVM/Zig)
+                  ow deps init [dir]      Create a project dependencies.yml
+                  ow deps install [dir]   Download libraries declared in dependencies.yml
+                  ow deps update [dir]    Refresh the dependency lockfile
+                  ow deps list [dir]      List declared OW libraries
                   ow package <file>     Bundle an app/game into a launchable .exe + installer
                                         [--name N] [--type gui|console|web] [--out dir] [--icon x.ico]
                   ow ide                Launch OwIDE
