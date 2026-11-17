@@ -27,6 +27,8 @@ public class LlvmIrGen {
     private int strCount;
 
     private final Set<String> functionNames = new HashSet<>();
+    private final Map<String, Ast.FnDecl> functionSignatures = new LinkedHashMap<>();
+    private String currentReturnType;
     private Map<String, String> locals;
     private Map<String, String> localTypes;
 
@@ -34,6 +36,7 @@ public class LlvmIrGen {
         globals.setLength(0);
         strCount = 0;
         functionNames.clear();
+        functionSignatures.clear();
         for (Ast.FnDecl fn : program.functions) {
             if (fn.name.startsWith("__ow_native_array_")) {
                 throw new RuntimeException("LLVM backend: reserved native runtime function name: " + fn.name);
@@ -41,6 +44,7 @@ public class LlvmIrGen {
             if (!functionNames.add(fn.name)) {
                 throw new RuntimeException("Duplicate function: " + fn.name);
             }
+            functionSignatures.put(fn.name, fn);
         }
 
         StringBuilder fnsCode = new StringBuilder();
@@ -68,33 +72,68 @@ public class LlvmIrGen {
         return out.toString();
     }
 
+    /**
+     * Native function ABI:
+     * - i32 is the default for legacy untyped parameters and returns
+     * - explicitly annotated `array` parameters own exactly one reference
+     * - returning `array` transfers one owned reference to the caller.
+     * Array-returning functions require a final explicit return to avoid a
+     * silently synthesized null array on fallthrough.
+     */
     private String emitFunction(Ast.FnDecl fn) {
         body = new StringBuilder();
         entryAllocs = new StringBuilder();
         tempId = 0;
         labelId = 0;
-        locals = new HashMap<>();
-        localTypes = new HashMap<>();
+        locals = new LinkedHashMap<>();
+        localTypes = new LinkedHashMap<>();
+        currentReturnType = llvmType(fn.returnType);
+
+        if (currentReturnType.equals("%ow.array") &&
+            (fn.body.isEmpty() || !(fn.body.get(fn.body.size() - 1) instanceof Ast.ReturnStmt))) {
+            throw new RuntimeException("LLVM backend: array-returning function '" + fn.name
+                    + "' must end with an explicit return");
+        }
 
         StringBuilder header = new StringBuilder();
-        header.append("define i32 @").append(fn.name).append("(");
+        header.append("define ").append(currentReturnType).append(" @")
+              .append(fn.name).append("(");
         for (int i = 0; i < fn.params.size(); i++) {
             if (i > 0) header.append(", ");
-            header.append("i32 %").append(fn.params.get(i)).append(".arg");
+            header.append(llvmType(fn.paramTypes.get(i))).append(" %")
+                  .append(fn.params.get(i)).append(".arg");
         }
         header.append(") {\nentry:\n");
 
-        for (String pname : fn.params) {
+        for (int i = 0; i < fn.params.size(); i++) {
+            String pname = fn.params.get(i);
+            String type = llvmType(fn.paramTypes.get(i));
             String ptr = "%" + pname;
-            locals.put(pname, ptr);
-            localTypes.put(pname, "i32");
-            body.append("  ").append(ptr).append(" = alloca i32\n");
-            body.append("  store i32 %").append(pname).append(".arg, i32* ").append(ptr).append("\n");
+            if (locals.putIfAbsent(pname, ptr) != null) {
+                throw new RuntimeException("LLVM backend: duplicate parameter: " + pname);
+            }
+            localTypes.put(pname, type);
+            if (type.equals("%ow.array")) {
+                entryAllocs.append("  ").append(ptr).append(" = alloca %ow.array\n");
+            } else {
+                body.append("  ").append(ptr).append(" = alloca i32\n");
+            }
+            // Caller transfers an owned reference into every array parameter.
+            // Callee releases the parameter on any return, including the
+            // implicit return for integer/void-style functions.
+            body.append("  store ").append(type).append(" %").append(pname)
+                    .append(".arg, ").append(type).append("* ").append(ptr).append("\n");
         }
 
-        for (Ast.Stmt s : fn.body) genStmt(s);
+        for (Ast.Stmt st : fn.body) genStmt(st);
         releaseAllArrayLocals();
-        body.append("  ret i32 0\n");
+        if (currentReturnType.equals("%ow.array")) {
+            // This return is in the unreachable after.return block when the
+            // final source statement is an explicit return.
+            body.append("  ret %ow.array zeroinitializer\n");
+        } else {
+            body.append("  ret i32 0\n");
+        }
         body.append("}\n\n");
         return header.toString() + entryAllocs + body;
     }
@@ -102,6 +141,7 @@ public class LlvmIrGen {
     private String emitMain(List<Ast.Stmt> mainBody) {
         body = new StringBuilder();
         entryAllocs = new StringBuilder();
+        currentReturnType = "i32";
         tempId = 0;
         labelId = 0;
         locals = new HashMap<>();
@@ -230,11 +270,18 @@ public class LlvmIrGen {
 
         if (st instanceof Ast.ReturnStmt r) {
             Value v = genExpr(r.value);
-            if (!v.type.equals("i32")) {
-                throw new RuntimeException("LLVM backend: return only supports integers");
+            if (!v.type.equals(currentReturnType)) {
+                throw new RuntimeException("LLVM backend: expected return type "
+                        + currentReturnType + " but got " + v.type);
+            }
+            if (v.type.equals("%ow.array") && !v.owned) {
+                // Borrowed array returned from a local/parameter must survive
+                // releasing that local's reference on function exit.
+                retainArray(v);
             }
             releaseAllArrayLocals();
-            body.append("  ret i32 ").append(v.ref).append("\n");
+            body.append("  ret ").append(v.type).append(" ")
+                    .append(v.ref).append("\n");
             String dead = "after.return." + (labelId++);
             body.append(dead).append(":\n");
             return;
@@ -378,22 +425,35 @@ public class LlvmIrGen {
             if (call.name.equals("input") || call.name.equals("int")) {
                 throw new RuntimeException("LLVM backend: builtin '" + call.name + "' is not supported yet");
             }
-            if (!functionNames.contains(call.name)) {
+            Ast.FnDecl signature = functionSignatures.get(call.name);
+            if (signature == null) {
                 throw new RuntimeException("Unknown function: " + call.name);
+            }
+            if (call.args.size() != signature.params.size()) {
+                throw new RuntimeException("LLVM backend: function '" + call.name
+                        + "' expects " + signature.params.size() + " arguments, got "
+                        + call.args.size());
             }
             StringBuilder args = new StringBuilder();
             for (int i = 0; i < call.args.size(); i++) {
                 Value av = genExpr(call.args.get(i));
-                if (!av.type.equals("i32")) {
-                    throw new RuntimeException("LLVM backend: function args must be integers");
+                String expected = llvmType(signature.paramTypes.get(i));
+                if (!av.type.equals(expected)) {
+                    throw new RuntimeException("LLVM backend: function '" + call.name
+                            + "' expects " + expected + " for argument " + (i + 1)
+                            + ", got " + av.type);
                 }
+                // An owned temporary is moved to the callee; borrowed
+                // variables are retained before the next argument is evaluated.
+                if (av.type.equals("%ow.array") && !av.owned) retainArray(av);
                 if (i > 0) args.append(", ");
-                args.append("i32 ").append(av.ref);
+                args.append(expected).append(" ").append(av.ref);
             }
+            String type = llvmType(signature.returnType);
             String t = newTemp();
-            body.append("  ").append(t).append(" = call i32 @").append(call.name)
-                    .append("(").append(args).append(")\n");
-            return new Value(t, "i32");
+            body.append("  ").append(t).append(" = call ").append(type).append(" @")
+                    .append(call.name).append("(").append(args).append(")\n");
+            return new Value(t, type, type.equals("%ow.array"));
         }
         throw new RuntimeException("Unknown expr: " + e.getClass());
     }
@@ -637,6 +697,20 @@ public class LlvmIrGen {
                 }
 
                 """;
+    }
+
+    /** Native subset supports int/bool scalars and explicitly annotated
+     * integer arrays; other source types must not silently lower to i32.
+     */
+    private static String llvmType(String declaredType) {
+        if (declaredType == null || declaredType.equals("int") || declaredType.equals("bool")) {
+            return "i32";
+        }
+        if (declaredType.equals("array") || declaredType.equals("list")) {
+            return "%ow.array";
+        }
+        throw new RuntimeException("LLVM backend: unsupported native function type '"
+                + declaredType + "' (supported: int, bool, array)");
     }
 
     private String emitStringLiteral(String s) {

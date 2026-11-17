@@ -35,9 +35,10 @@ ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 ./target/native-array-memory-asan
 ## Explicit limitations
 
 - This is a focused first version of ARC, **not a full garbage collector**.
-- Only native arrays of 32-bit integers are supported; arrays as function
-  arguments/return values, arbitrary objects and nested arrays remain
-  interpreter-only.
+- Native arrays support **explicitly typed** function parameters and
+  return values with ownership transfer. See [native array functions](native-array-functions.md).
+- Only 32-bit integer array elements are supported; arbitrary objects and
+  nested arrays remain interpreter-only.
 - Reference counts are non-atomic (OW's native array subset is single-threaded).
 - All array references must be represented through compiler-managed array
   variables or temporary expressions. Native FFI and foreign holders are not

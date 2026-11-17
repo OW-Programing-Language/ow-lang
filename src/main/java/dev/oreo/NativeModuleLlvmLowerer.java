@@ -66,7 +66,8 @@ public final class NativeModuleLlvmLowerer {
             Map<String, Instance> locals = new LinkedHashMap<>(globalModules);
             for (String param : fn.params) locals.remove(param);
             functions.add(new Ast.FnDecl(fn.name, fn.params,
-                    rewrite(fn.body, locals, new LinkedHashMap<>())));
+                    rewrite(fn.body, locals, new LinkedHashMap<>()),
+                    fn.annotations, fn.paramTypes, fn.returnType));
         }
         functions.addAll(generatedFunctions.values());
         return new Ast.Program(List.of(), functions, source.enums,
