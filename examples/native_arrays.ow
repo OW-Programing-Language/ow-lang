@@ -1,0 +1,14 @@
+# First native OW integer-array milestone.
+# Run: ow run examples/native_arrays.ow
+# Build: ow build examples/native_arrays.ow native-arrays
+main:
+  set numbers: [10, 20, 30]
+  print: len(numbers)
+  print: numbers[1]
+
+  set other: numbers
+  set numbers[1]: 99
+  print: other[1]
+
+  set empty: []
+  print: len(empty)

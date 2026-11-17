@@ -1,0 +1,4 @@
+# Deliberately fails at runtime when compiled natively.
+main:
+  set items: [10, 20]
+  print: items[2]

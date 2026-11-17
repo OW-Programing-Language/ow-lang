@@ -72,6 +72,15 @@ runtime exceptions. The native OWUnit assertions library lives at
 [testing and exceptions](docs/testing-and-exceptions.md) for details and
 interpreter-only limitations.
 
+## Native LLVM integer arrays (experimental)
+
+The native backend now handles integer-array literals, `len(array)`, checked
+array indexing and indexed assignment, including shared array aliases.
+Run `ow llvm examples/native_arrays.ow` or build the example natively.
+**This remains experimental:** native array allocations have no reclamation
+strategy yet, and only integer element types are supported. See
+[native arrays and limitations](docs/native-arrays.md).
+
 ## Language features
 
 Ow is now a fully object-oriented language while keeping its clean,
