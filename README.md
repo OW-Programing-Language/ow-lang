@@ -96,6 +96,24 @@ concatenation remain unsupported. See
 [native strings and limitations](docs/native-strings.md) and
 [dynamic string memory management](docs/native-dynamic-strings.md).
 
+## YAML-style function signatures (preferred)
+
+Functions, class/module methods and interface signatures support colon-based
+parameter types and a first-line `returns:` declaration, avoiding the
+`->` symbol while preserving backwards compatibility:
+
+```ow
+fn greet(name: string):
+  returns: string
+  return: "Hello " + name
+
+main:
+  print: greet("OW")
+```
+
+See the [YAML function syntax guide](docs/yaml-function-syntax.md) and
+[executable example](examples/yaml_signatures.ow).
+
 ## Language features
 
 Ow is now a fully object-oriented language while keeping its clean,
@@ -105,7 +123,7 @@ indentation + `key: value` YAML aesthetic.
   (`int`, `string`, `bool`, `array`, enum and class names are checked at runtime).
 - **Control flow** — `if` / `else` / `else if`, `while`, and `switch` / `case` /
   `default` (a `case` may list several values: `case 2, 3:`).
-- **Functions** — `fn name(params):`, `return:`, `call:`.
+- **Functions** — YAML-style `fn greet(name: string):` with an indented `returns: string` declaration, plus executable `return:` and `call:`. Legacy `name string` and `-> string` signatures remain compatible. See [YAML function syntax](docs/yaml-function-syntax.md).
 - **Enums** — `enum Color:` with indented variants, used as `Color.Red`.
 - **Interfaces** — `interface Shape:` listing `fn` signatures.
 - **Classes** — `field` and `fn` members, `new ClassName(args)`, a `new`
