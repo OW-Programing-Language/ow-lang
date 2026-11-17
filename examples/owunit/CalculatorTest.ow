@@ -1,0 +1,26 @@
+# Run: ow test examples/owunit/CalculatorTest.ow
+class CalculatorTest:
+  field value
+
+  @BeforeEach
+  fn setup():
+    set this.value: 2
+
+  @Test
+  fn addsNumbers():
+    call: assert(this.value + 3 == 5, "incorrect addition")
+
+  @Test
+  fn catchesExpectedErrors():
+    set caught: false
+    try:
+      throw: "intentional"
+    catch message:
+      set caught: message == "intentional"
+    finally:
+      print: "always cleanup"
+    call: assert(caught, "error was not caught")
+
+  @AfterEach
+  fn cleanup():
+    set this.value: 0
