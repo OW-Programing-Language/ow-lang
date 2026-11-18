@@ -1,5 +1,8 @@
 # Ow
 
+**Official documentation:** [OW Language Documentation](https://ow-programing-language.github.io/owdocs/) · [Documentation française](https://ow-programing-language.github.io/owdocs/fr.html) · [Documentation source](https://github.com/OW-Programing-Language/owdocs)
+
+
 Ow is a small, indentation-based, **YAML-looking** programming language with a
 Java-hosted toolchain. It ships with a tree-walking interpreter, an LLVM IR
 backend (for compiling the procedural subset to native executables), a bundled
