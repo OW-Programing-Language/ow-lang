@@ -1,0 +1,6 @@
+# Must reject the second insertion: first -> second -> first.
+main:
+  set first: { number: 1, label: "first" }
+  set second: { number: 2, label: "second" }
+  set first["child"]: second
+  set second["back"]: first
