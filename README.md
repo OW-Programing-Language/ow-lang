@@ -111,8 +111,10 @@ for homogeneous values. Reference counting releases dynamically owned
 strings on replacement, deletion and map cleanup. Native lookup, insertion and deletion now use a shared **resizing UTF-8 hash
 table** (average O(1), worst-case O(n)), rather than a linear scan.
 Native **nested dictionaries** can now be stored and read recursively,
-with managed child references and cycle prevention. Array/object map values
-and native enumeration are not supported. See
+with managed child references and cycle prevention. Array/object map values and native JSON are not supported. Native
+`map_keys` and `map_values` now preserve insertion order and return
+owned arrays, including `mixed_array` snapshots of tagged nested values. See
+[ordered native iteration](docs/native-map-iteration.md),
 [native nested dictionaries](docs/native-nested-maps.md),
 [hash-table implementation](docs/native-hash-dictionaries.md),
 [native mixed dictionaries](docs/native-mixed-dictionaries.md),
