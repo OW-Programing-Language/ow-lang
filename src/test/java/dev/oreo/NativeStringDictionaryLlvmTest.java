@@ -16,8 +16,8 @@ public class NativeStringDictionaryLlvmTest {
                   set m: { "Blaze": "mob/blaze", Zombie: "mob/zombie" }
                   print: m["Blaze"]
                 """);
-        assertTrue(llvm.contains("%ow.strmap.entry = type { %ow.string, %ow.string, %ow.strmap.entry* }"));
-        assertTrue(llvm.contains("%ow.strmap = type { %ow.strmap.entry**, i32, i32, i32 }"));
+        assertTrue(llvm.contains("%ow.strmap.entry = type { %ow.string, %ow.string, %ow.strmap.entry*, %ow.strmap.entry*, %ow.strmap.entry* }"));
+        assertTrue(llvm.contains("%ow.strmap = type { %ow.strmap.entry**, i32, i32, i32, %ow.strmap.entry*, %ow.strmap.entry* }"));
         assertTrue(llvm.contains("call %ow.strmap* @__ow_native_strmap_new()"));
         assertTrue(llvm.contains("call void @__ow_native_strmap_set(%ow.strmap*"));
         assertTrue(llvm.contains("call %ow.string @__ow_native_strmap_get(%ow.strmap*"));
@@ -115,7 +115,7 @@ public class NativeStringDictionaryLlvmTest {
                   set m["a"]: 7
                   print: m["a"]
                 """);
-        assertTrue(llvm.contains("%ow.intmap.entry = type { %ow.string, i32, %ow.intmap.entry* }"));
+        assertTrue(llvm.contains("%ow.intmap.entry = type { %ow.string, i32, %ow.intmap.entry*, %ow.intmap.entry*, %ow.intmap.entry* }"));
         assertTrue(llvm.contains("call i32 @__ow_native_intmap_get("));
     }
 
