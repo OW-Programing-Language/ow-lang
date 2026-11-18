@@ -43,7 +43,8 @@ public class LlvmIrGen {
                     || fn.name.startsWith("__ow_native_intmap_")
                     || fn.name.startsWith("__ow_native_strmap_")
                     || fn.name.startsWith("__ow_native_mixedmap_")
-                    || fn.name.startsWith("__ow_native_mixed_")) {
+                    || fn.name.startsWith("__ow_native_mixed_")
+                    || fn.name.startsWith("__ow_native_nested_")) {
                 throw new RuntimeException("LLVM backend: reserved native runtime function name: " + fn.name);
             }
             if (!functionNames.add(fn.name)) {
@@ -76,7 +77,7 @@ public class LlvmIrGen {
         out.append("%ow.intmap = type { %ow.intmap.entry**, i32, i32, i32 }\n");
         out.append("%ow.strmap.entry = type { %ow.string, %ow.string, %ow.strmap.entry* }\n");
         out.append("%ow.strmap = type { %ow.strmap.entry**, i32, i32, i32 }\n");
-        out.append("%ow.mixed = type { i32, i32, %ow.string }\n");
+        out.append("%ow.mixed = type { i32, i32, %ow.string, i8* }\n");
         out.append("%ow.mixedmap.entry = type { %ow.string, %ow.mixed, %ow.mixedmap.entry* }\n");
         out.append("%ow.mixedmap = type { %ow.mixedmap.entry**, i32, i32, i32 }\n");
         out.append("declare i8* @calloc(i64, i64)\n");
@@ -96,6 +97,7 @@ public class LlvmIrGen {
         out.append(nativeIntegerMapHelpers());
         out.append(NativeStringMapIr.generate());
         out.append(NativeMixedMapIr.generate());
+        out.append(NativeNestedMapIr.generate());
         out.append(fnsCode);
         return out.toString();
     }
@@ -469,23 +471,30 @@ public class LlvmIrGen {
             return buildArrayValue(Integer.toString(count), storage.ref);
         }
         if (e instanceof Ast.MapLit map) {
-            // Evaluate each value exactly once, retaining borrowed strings
-            // *at evaluation time* so later side effects cannot invalidate
-            // values before the map is allocated.
+            // Evaluate values once in source order. Retain borrowed references
+            // before any subsequent expression can mutate their owners.
+            // A map-typed value requires tagged storage even when it is the
+            // only value in a nonempty dictionary.
             List<Value> values = new ArrayList<>();
             boolean sawInt = false;
             boolean sawString = false;
+            boolean sawNested = false;
             for (Ast.Expr expression : map.values) {
                 Value value = genExpr(expression);
-                if (!value.type.equals("i32") && !value.type.equals("%ow.string")) {
-                    throw new RuntimeException("LLVM backend: native dictionary values must be integers or strings");
+                if (!value.type.equals("i32") && !value.type.equals("%ow.string")
+                        && !value.type.equals("%ow.intmap*")
+                        && !value.type.equals("%ow.strmap*")
+                        && !value.type.equals("%ow.mixedmap*")
+                        && !value.type.equals("%ow.mixed")) {
+                    throw new RuntimeException("LLVM backend: native dictionary values must be integers, strings or maps");
                 }
                 sawInt |= value.type.equals("i32");
                 sawString |= value.type.equals("%ow.string");
-                if (value.type.equals("%ow.string") && !value.owned) retainManaged(value);
+                sawNested |= !value.type.equals("i32") && !value.type.equals("%ow.string");
+                if (isManaged(value.type) && !value.owned) retainManaged(value);
                 values.add(new Value(value.ref, value.type, true));
             }
-            String kind = sawInt && sawString ? "mixedmap"
+            String kind = sawNested || (sawInt && sawString) ? "mixedmap"
                     : sawString ? "strmap" : "intmap";
             Value dictionary = switch (kind) {
                 case "mixedmap" -> createMixedMap();
@@ -517,6 +526,17 @@ public class LlvmIrGen {
         if (e instanceof Ast.IndexExpr idx) {
             Value target = genExpr(idx.target);
             Value index = genExpr(idx.index);
+            if (target.type.equals("%ow.mixed")) {
+                requireIntegerMapKey(index);
+                String found = newTemp();
+                body.append("  ").append(found)
+                        .append(" = call %ow.mixed @__ow_native_nested_index(%ow.mixed ")
+                        .append(target.ref).append(", %ow.string ")
+                        .append(index.ref).append(")\n");
+                if (index.owned) releaseManaged(index);
+                if (target.owned) releaseManaged(target);
+                return new Value(found, "%ow.mixed", true);
+            }
             if (target.type.equals("%ow.mixedmap*")) {
                 requireIntegerMapKey(index);
                 String result = newTemp();
@@ -740,12 +760,17 @@ public class LlvmIrGen {
             if (!value.owned) retainManaged(value);
             return new Value(value.ref, value.type, true);
         }
-        if (!value.type.equals("i32") && !value.type.equals("%ow.string")) {
-            throw new RuntimeException("LLVM backend: mixed map supports integer/string values only");
-        }
-        if (value.type.equals("%ow.string") && !value.owned) retainManaged(value);
+        String name = switch (value.type) {
+            case "i32" -> "wrap_i32";
+            case "%ow.string" -> "wrap_string";
+            case "%ow.intmap*" -> "wrap_intmap";
+            case "%ow.strmap*" -> "wrap_strmap";
+            case "%ow.mixedmap*" -> "wrap_mixedmap";
+            default -> throw new RuntimeException(
+                    "LLVM backend: nested maps support integers, strings and native dictionaries only");
+        };
+        if (isManaged(value.type) && !value.owned) retainManaged(value);
         String t = newTemp();
-        String name = value.type.equals("i32") ? "wrap_i32" : "wrap_string";
         body.append("  ").append(t).append(" = call %ow.mixed @__ow_native_mixed_")
                 .append(name).append("(").append(value.type).append(" ")
                 .append(value.ref).append(")\n");
