@@ -1,0 +1,72 @@
+# Dictionary iteration snapshots preserve insertion order, not hash order.
+# A 45-entry literal forces two hash table resizes.
+fn pick(values: mixed_array):
+  returns: mixed
+  return: values[1]
+
+main:
+  set numbers: { "item00": 0, "item01": 1, "item02": 2, "item03": 3, "item04": 4, "item05": 5, "item06": 6, "item07": 7, "item08": 8, "item09": 9, "item10": 10, "item11": 11, "item12": 12, "item13": 13, "item14": 14, "item15": 15, "item16": 16, "item17": 17, "item18": 18, "item19": 19, "item20": 20, "item21": 21, "item22": 22, "item23": 23, "item24": 24, "item25": 25, "item26": 26, "item27": 27, "item28": 28, "item29": 29, "item30": 30, "item31": 31, "item32": 32, "item33": 33, "item34": 34, "item35": 35, "item36": 36, "item37": 37, "item38": 38, "item39": 39, "item40": 40, "item41": 41, "item42": 42, "item43": 43, "item44": 44 }
+  set keys: map_keys(numbers)
+  set nums: map_values(numbers)
+  print: len(keys)
+  print: keys[0]
+  print: nums[0]
+  print: keys[12]
+  print: nums[12]
+  print: keys[44]
+  print: nums[44]
+
+  set numbers: map_delete(numbers, "item01")
+  set numbers: map_delete(numbers, "item00")
+  set numbers: map_set(numbers, "item01", 101)
+  set numbers: map_set(numbers, "item00", 100)
+  set numbers: map_set(numbers, "item12", 1200)
+  set currentKeys: map_keys(numbers)
+  set currentValues: map_values(numbers)
+  print: currentKeys[0]
+  print: currentValues[0]
+  print: currentKeys[42]
+  print: currentValues[42]
+  print: currentKeys[43]
+  print: currentValues[43]
+  print: currentKeys[44]
+  print: currentValues[44]
+  print: keys[0]
+  print: nums[0]
+  print: nums[12]
+
+  set text: { greeting: "Hel" + "lo", status: "ready", "été": "été" }
+  set textValues: map_values(text)
+  set textKeys: map_keys(text)
+  set text: map_delete(text, "greeting")
+  print: textKeys[0]
+  print: textKeys[2]
+  print: textValues[0]
+  print: textValues[2]
+  print: map_keys(text)[0]
+  print: map_values(text)[0]
+
+  set child: { port: 5432 }
+  set mixed: { name: "OW", version: 6, nested: child }
+  set snapshots: map_values(mixed)
+  set mixedKeys: map_keys(mixed)
+  print: len(snapshots)
+  print: mixedKeys[0]
+  print: snapshots[0]
+  print: pick(snapshots)
+  print: snapshots[2]["port"]
+  set mixed: map_delete(mixed, "nested")
+  set child: { port: 1 }
+  print: snapshots[2]["port"]
+  print: len(map_values(mixed))
+  print: map_keys({ hello: 1, world: 2 })[1]
+  print: map_values({ name: "OW", year: 2026 })[1]
+  print: len(map_keys({}))
+  print: len(map_values({}))
+  set i: 0
+  while: i < 40
+    set tmp: map_keys({ a: 1, b: 2, c: 3 })
+    set tmpValues: map_values({ t: "x", n: 1 })
+    set i: i + 1
+  print: tmp[2]
+  print: tmpValues[0]
