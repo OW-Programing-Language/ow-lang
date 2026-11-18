@@ -22,7 +22,7 @@ public class NativeHashMapLlvmTest {
         assertTrue(ll.contains("%multiplied = mul i64 %xored, 1099511628211"));
         assertTrue(ll.contains("and i64 %hash, %mask"));
         assertTrue(ll.contains("call i8* @calloc(i64 16, i64 %pointerBytes)"));
-        assertTrue(ll.contains("%ow.intmap = type { %ow.intmap.entry**, i32, i32, i32 }"));
+        assertTrue(ll.contains("%ow.intmap = type { %ow.intmap.entry**, i32, i32, i32, %ow.intmap.entry*, %ow.intmap.entry* }"));
     }
 
     @Test public void bucketLookupUsesCollisionChainNotGlobalLinkedList() {
