@@ -62,7 +62,7 @@ public class NativeNestedMapLlvmTest {
                 main:
                   set m: { nested: { name: "OW" } }
                   set alias: m
-                  set m: { replacement: 4 }
+                  set m: { replacement: 4, child: { x: 1 } }
                 """);
         assertTrue(ll.contains("call void @__ow_native_nested_retain(%ow.mixed %value)"));
         assertTrue(ll.contains("call void @__ow_native_nested_release(%ow.mixed %value)"));
