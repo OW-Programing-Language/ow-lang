@@ -119,12 +119,14 @@ public class NativeStringDictionaryLlvmTest {
         assertTrue(llvm.contains("call i32 @__ow_native_intmap_get("));
     }
 
-    @Test public void mixedValueTypesRejected() {
-        RuntimeException e = assertThrows(RuntimeException.class, () -> ir("""
+    @Test public void mixedValueTypesSelectTaggedMap() {
+        String llvm = ir("""
                 main:
                   set m: { a: "text", b: 7 }
-                """));
-        assertTrue(e.getMessage().contains("mixed dictionary value types"));
+                  print: m["a"]
+                """);
+        assertTrue(llvm.contains("call %ow.mixedmap* @__ow_native_mixedmap_new()"));
+        assertTrue(llvm.contains("call %ow.mixed @__ow_native_mixedmap_get("));
     }
 
     @Test public void stringMapIndexUpdateRejectsIntegers() {
