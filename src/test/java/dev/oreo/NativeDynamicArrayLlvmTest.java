@@ -69,11 +69,20 @@ public class NativeDynamicArrayLlvmTest {
         assertTrue(e.getMessage().contains("size must be an integer"));
     }
 
-    @Test public void invalidDynamicFillTypeRejected() {
+    @Test public void nestedDynamicFillTypeRejected() {
         RuntimeException e = assertThrows(RuntimeException.class, () -> ir("""
                 main:
-                  set items: array(3, "x")
+                  set items: array(3, [1])
                 """));
-        assertTrue(e.getMessage().contains("only integers"));
+        assertTrue(e.getMessage().contains("array fill must be int or string"));
+    }
+
+    @Test public void dynamicStringFillUsesStringArrayABI() {
+        String llvm = ir("""
+                main:
+                  set names: array(3, "x")
+                  print: names[0]
+                """);
+        assertTrue(llvm.contains("call %ow.strarray @__ow_native_strarray_new(i32 3)"));
     }
 }

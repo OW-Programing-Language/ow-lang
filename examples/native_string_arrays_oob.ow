@@ -1,0 +1,4 @@
+# This program must abort in native mode instead of accessing invalid memory.
+main:
+  set names: ["a", "b"]
+  print: names[2]

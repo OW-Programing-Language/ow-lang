@@ -47,7 +47,8 @@ with `detect_leaks=1` to detect leaks and invalid access.
   mixed-type concatenation (such as `"x" + 42`) requires a separate
   conversion/type-lowering milestone.
 - Strings are immutable and single-threaded; the native reference counter
-  is non-atomic. Native string arrays and dictionaries are not available yet.
+  is non-atomic. Native string arrays are now supported in the experimental
+  [string-array backend](native-string-arrays.md), but dictionaries are not yet native.
 - Native exception handling and a general object garbage collector remain
   future work.
 - This feature changes the experimental native string ABI from plain

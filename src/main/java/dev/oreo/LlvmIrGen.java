@@ -38,7 +38,8 @@ public class LlvmIrGen {
         functionNames.clear();
         functionSignatures.clear();
         for (Ast.FnDecl fn : program.functions) {
-            if (fn.name.startsWith("__ow_native_array_") || fn.name.startsWith("__ow_native_string_")) {
+            if (fn.name.startsWith("__ow_native_array_") || fn.name.startsWith("__ow_native_string_")
+                    || fn.name.startsWith("__ow_native_strarray_")) {
                 throw new RuntimeException("LLVM backend: reserved native runtime function name: " + fn.name);
             }
             if (!functionNames.add(fn.name)) {
@@ -64,6 +65,8 @@ public class LlvmIrGen {
         // semantics implementation; this ARC subset only covers i32 arrays.
         out.append("%ow.array = type { i32, i32*, i32* }\n");
         out.append("%ow.string = type { i8*, i32* }\n");
+        // String arrays carry refcounted %ow.string elements and own them.
+        out.append("%ow.strarray = type { i32, %ow.string*, i32* }\n");
         out.append("declare i8* @calloc(i64, i64)\n");
         out.append("declare void @free(i8*)\n");
         out.append("declare void @abort() noreturn\n");
@@ -74,6 +77,7 @@ public class LlvmIrGen {
         out.append(nativeArrayHelpers());
         out.append(nativeStringHelpers());
         out.append(nativeOwnedStringHelpers());
+        out.append(nativeStringArrayHelpers());
         out.append(fnsCode);
         return out.toString();
     }
@@ -135,10 +139,9 @@ public class LlvmIrGen {
 
         for (Ast.Stmt st : fn.body) genStmt(st);
         releaseAllManagedLocals();
-        if (currentReturnType.equals("%ow.array")) {
-            // This return is in the unreachable after.return block when the
-            // final source statement is an explicit return.
-            body.append("  ret %ow.array zeroinitializer\n");
+        if (currentReturnType.equals("%ow.array") || currentReturnType.equals("%ow.strarray")) {
+            // The explicit source return has already emitted the real result.
+            body.append("  ret ").append(currentReturnType).append(" zeroinitializer\n");
         } else if (currentReturnType.equals("%ow.string")) {
             body.append("  ret %ow.string zeroinitializer\n");
         } else {
@@ -212,11 +215,26 @@ public class LlvmIrGen {
             Value index = genExpr(set.index);
             String elementPtr = checkedArrayElement(array, index);
             Value value = genExpr(set.value);
-            if (!value.type.equals("i32")) {
-                throw new RuntimeException("LLVM backend: native arrays currently store only integers");
+            if (array.type.equals("%ow.strarray")) {
+                if (!value.type.equals("%ow.string")) {
+                    throw new RuntimeException("LLVM backend: string arrays require string elements");
+                }
+                // Retain before releasing the previous element. This remains
+                // safe for set items[0]: items[0] and shared string aliases.
+                if (!value.owned) retainManaged(value);
+                String old = newTemp();
+                body.append("  ").append(old)
+                        .append(" = load %ow.string, %ow.string* ").append(elementPtr).append("\n");
+                releaseManaged(new Value(old, "%ow.string"));
+                body.append("  store %ow.string ").append(value.ref)
+                        .append(", %ow.string* ").append(elementPtr).append("\n");
+            } else {
+                if (!value.type.equals("i32")) {
+                    throw new RuntimeException("LLVM backend: integer arrays require integer elements");
+                }
+                body.append("  store i32 ").append(value.ref).append(", i32* ")
+                        .append(elementPtr).append("\n");
             }
-            body.append("  store i32 ").append(value.ref).append(", i32* ")
-                    .append(elementPtr).append("\n");
             return;
         }
 
@@ -342,14 +360,34 @@ public class LlvmIrGen {
             return new Value(b.value ? "1" : "0", "i32");
         }
         if (e instanceof Ast.ArrayLit a) {
-            // Array contents are heap-backed. Aliases share mutations, while
-            // retaining/releasing references prevents premature frees.
+            // [] keeps its existing integer-array type. Nonempty literals
+            // select integer vs string elements from the first expression.
             int count = a.elements.size();
+            // Evaluate the first element only once, then determine its type.
+            // This supports variables, string-producing calls and expressions
+            // without guessing from AST syntax or duplicating side effects.
+            Value first = count > 0 ? genExpr(a.elements.get(0)) : null;
+            if (first != null && first.type.equals("%ow.string")) {
+                Value array = allocateStringArray(Integer.toString(count));
+                for (int i = 0; i < count; i++) {
+                    Value element = i == 0 ? first : genExpr(a.elements.get(i));
+                    if (!element.type.equals("%ow.string")) {
+                        throw new RuntimeException("LLVM backend: mixed integer/string array literal");
+                    }
+                    // The container becomes one owner of each element.
+                    if (!element.owned) retainManaged(element);
+                    String ptr = stringArrayElementPointer(array, Integer.toString(i));
+                    body.append("  store %ow.string ").append(element.ref)
+                            .append(", %ow.string* ").append(ptr).append("\n");
+                }
+                return array;
+            }
+            // Integer arrays retain the previous native ABI and behavior.
             Value storage = allocatedArrayData(count);
             for (int i = 0; i < count; i++) {
-                Value element = genExpr(a.elements.get(i));
+                Value element = i == 0 ? first : genExpr(a.elements.get(i));
                 if (!element.type.equals("i32")) {
-                    throw new RuntimeException("LLVM backend: native arrays currently store only integers");
+                    throw new RuntimeException("LLVM backend: mixed or unsupported array literal element types");
                 }
                 String item = newTemp();
                 body.append("  ").append(item).append(" = getelementptr i32, i32* ")
@@ -373,9 +411,21 @@ public class LlvmIrGen {
             Value index = genExpr(idx.index);
             String ptr = checkedArrayElement(target, index);
             String result = newTemp();
+            if (target.type.equals("%ow.strarray")) {
+                body.append("  ").append(result).append(" = load %ow.string, %ow.string* ")
+                        .append(ptr).append("\n");
+                Value item = new Value(result, "%ow.string");
+                if (target.owned) {
+                    // A temporary container is freed after the child gets its
+                    // own reference. Return an owned string in this case.
+                    retainManaged(item);
+                    releaseManaged(target);
+                    return new Value(result, "%ow.string", true);
+                }
+                return item;
+            }
             body.append("  ").append(result).append(" = load i32, i32* ")
                     .append(ptr).append("\n");
-            // Literal/dynamically created temporary arrays must not leak.
             if (target.owned) releaseArray(target);
             return new Value(result, "i32");
         }
@@ -462,12 +512,12 @@ public class LlvmIrGen {
                     if (array.owned) releaseManaged(array);
                     return new Value(length, "i32");
                 }
-                if (!array.type.equals("%ow.array"))
-                    throw new RuntimeException("LLVM backend: len currently supports integer arrays and strings");
+                if (!array.type.equals("%ow.array") && !array.type.equals("%ow.strarray"))
+                    throw new RuntimeException("LLVM backend: len supports integer arrays, string arrays and strings");
                 String length = newTemp();
-                body.append("  ").append(length).append(" = extractvalue %ow.array ")
-                        .append(array.ref).append(", 0\n");
-                if (array.owned) releaseArray(array);
+                body.append("  ").append(length).append(" = extractvalue ")
+                        .append(array.type).append(" ").append(array.ref).append(", 0\n");
+                if (array.owned) releaseManaged(array);
                 return new Value(length, "i32");
             }
             if (call.name.equals("array")) {
@@ -479,8 +529,14 @@ public class LlvmIrGen {
                 // Interpreter rejects an invalid size before evaluating the fill.
                 checkNonNegativeArraySize(count);
                 Value fill = genExpr(call.args.get(1));
+                if (fill.type.equals("%ow.string")) {
+                    Value array = allocateStringArray(count.ref);
+                    fillStringArray(array, count, fill);
+                    if (fill.owned) releaseManaged(fill);
+                    return array;
+                }
                 if (!fill.type.equals("i32"))
-                    throw new RuntimeException("LLVM backend: native arrays currently store only integers");
+                    throw new RuntimeException("LLVM backend: array fill must be int or string");
                 Value storage = allocatedArrayData(count);
                 fillArrayData(storage, count, fill);
                 return buildArrayValue(count.ref, storage.ref);
@@ -624,6 +680,64 @@ public class LlvmIrGen {
         body.append(end).append(":\n");
     }
 
+    /** Native string arrays are separately typed to protect the integer
+     * array ABI and ensure their child string references can be released.
+     * The runtime allocates zero-initialized element slots and one owner.
+     */
+    private Value allocateStringArray(String length) {
+        String result = newTemp();
+        body.append("  ").append(result)
+                .append(" = call %ow.strarray @__ow_native_strarray_new(i32 ")
+                .append(length).append(")\n");
+        return new Value(result, "%ow.strarray", true);
+    }
+
+    private String stringArrayElementPointer(Value array, String index) {
+        String storage = newTemp();
+        body.append("  ").append(storage).append(" = extractvalue %ow.strarray ")
+                .append(array.ref).append(", 1\n");
+        String ptr = newTemp();
+        body.append("  ").append(ptr)
+                .append(" = getelementptr %ow.string, %ow.string* ")
+                .append(storage).append(", i32 ").append(index).append("\n");
+        return ptr;
+    }
+
+    /** Each element retains the one fill value: filling a string array
+     * must never give multiple slots the same single owned reference.
+     * Finally release the fill temporary once (handled by the caller).
+     */
+    private void fillStringArray(Value array, Value count, Value fill) {
+        int id = labelId++;
+        String start = "strarray.fill.start." + id;
+        String condition = "strarray.fill.cond." + id;
+        String loop = "strarray.fill.body." + id;
+        String end = "strarray.fill.end." + id;
+        String counter = newTemp();
+        String next = newTemp();
+        body.append("  br label %").append(start).append("\n");
+        body.append(start).append(":\n");
+        body.append("  br label %").append(condition).append("\n");
+        body.append(condition).append(":\n");
+        body.append("  ").append(counter).append(" = phi i32 [ 0, %")
+                .append(start).append(" ], [ ").append(next)
+                .append(", %").append(loop).append(" ]\n");
+        String isLess = newTemp();
+        body.append("  ").append(isLess).append(" = icmp slt i32 ")
+                .append(counter).append(", ").append(count.ref).append("\n");
+        body.append("  br i1 ").append(isLess).append(", label %")
+                .append(loop).append(", label %").append(end).append("\n");
+        body.append(loop).append(":\n");
+        retainManaged(fill);
+        String ptr = stringArrayElementPointer(array, counter);
+        body.append("  store %ow.string ").append(fill.ref)
+                .append(", %ow.string* ").append(ptr).append("\n");
+        body.append("  ").append(next).append(" = add i32 ")
+                .append(counter).append(", 1\n");
+        body.append("  br label %").append(condition).append("\n");
+        body.append(end).append(":\n");
+    }
+
     private Value buildArrayValue(String length, String data) {
         // A newly created native array owns exactly one reference. Each
         // independently allocated refcount is freed with its backing store.
@@ -662,13 +776,13 @@ public class LlvmIrGen {
     }
 
     private String checkedArrayElement(Value array, Value index) {
-        if (!array.type.equals("%ow.array"))
-            throw new RuntimeException("LLVM backend: indexing requires an integer array");
+        if (!array.type.equals("%ow.array") && !array.type.equals("%ow.strarray"))
+            throw new RuntimeException("LLVM backend: indexing requires an integer or string array");
         if (!index.type.equals("i32"))
             throw new RuntimeException("LLVM backend: array indices must be integers");
         String size = newTemp();
-        body.append("  ").append(size).append(" = extractvalue %ow.array ")
-                .append(array.ref).append(", 0\n");
+        body.append("  ").append(size).append(" = extractvalue ")
+                .append(array.type).append(" ").append(array.ref).append(", 0\n");
         String nonNegative = newTemp();
         body.append("  ").append(nonNegative).append(" = icmp sge i32 ")
                 .append(index.ref).append(", 0\n");
@@ -687,6 +801,9 @@ public class LlvmIrGen {
         body.append("  call void @abort()\n");
         body.append("  unreachable\n");
         body.append(inside).append(":\n");
+        if (array.type.equals("%ow.strarray")) {
+            return stringArrayElementPointer(array, index.ref);
+        }
         String data = newTemp();
         body.append("  ").append(data).append(" = extractvalue %ow.array ")
                 .append(array.ref).append(", 1\n");
@@ -714,7 +831,8 @@ public class LlvmIrGen {
     }
 
     private static boolean isManaged(String type) {
-        return type.equals("%ow.array") || type.equals("%ow.string");
+        return type.equals("%ow.array") || type.equals("%ow.string")
+                || type.equals("%ow.strarray");
     }
 
     private String stringData(Value string) {
@@ -726,6 +844,9 @@ public class LlvmIrGen {
 
     private void retainManaged(Value value) {
         if (value.type.equals("%ow.array")) retainArray(value);
+        else if (value.type.equals("%ow.strarray"))
+            body.append("  call void @__ow_native_strarray_retain(%ow.strarray ")
+                    .append(value.ref).append(")\n");
         else if (value.type.equals("%ow.string"))
             body.append("  call void @__ow_native_string_retain(%ow.string ")
                     .append(value.ref).append(")\n");
@@ -734,6 +855,9 @@ public class LlvmIrGen {
 
     private void releaseManaged(Value value) {
         if (value.type.equals("%ow.array")) releaseArray(value);
+        else if (value.type.equals("%ow.strarray"))
+            body.append("  call void @__ow_native_strarray_release(%ow.strarray ")
+                    .append(value.ref).append(")\n");
         else if (value.type.equals("%ow.string"))
             body.append("  call void @__ow_native_string_release(%ow.string ")
                     .append(value.ref).append(")\n");
@@ -752,6 +876,101 @@ public class LlvmIrGen {
             if (isManaged(entry.getValue()))
                 releaseManagedFromSlot(locals.get(entry.getKey()), entry.getValue());
         }
+    }
+
+    /** Managed string-array runtime. A string_array owns its elements:
+     * last owner destruction walks every child and releases the string.
+     * Works with statically allocated literals and heap string concat values.
+     */
+    private static String nativeStringArrayHelpers() {
+        return """
+                define %ow.strarray @__ow_native_strarray_new(i32 %length) {
+                entry:
+                  %validLength = icmp sge i32 %length, 0
+                  br i1 %validLength, label %allocation, label %invalid
+                invalid:
+                  call void @abort()
+                  unreachable
+                allocation:
+                  %empty = icmp eq i32 %length, 0
+                  %slots = select i1 %empty, i32 1, i32 %length
+                  %slots64 = zext i32 %slots to i64
+                  %elementEnd = getelementptr %ow.string, %ow.string* null, i32 1
+                  %elementSize = ptrtoint %ow.string* %elementEnd to i64
+                  %raw = call i8* @calloc(i64 %slots64, i64 %elementSize)
+                  %allocated = icmp ne i8* %raw, null
+                  br i1 %allocated, label %allocateRefs, label %oom
+                oom:
+                  call void @abort()
+                  unreachable
+                allocateRefs:
+                  %refsRaw = call i8* @calloc(i64 1, i64 4)
+                  %refsValid = icmp ne i8* %refsRaw, null
+                  br i1 %refsValid, label %ready, label %refsOom
+                refsOom:
+                  call void @free(i8* %raw)
+                  call void @abort()
+                  unreachable
+                ready:
+                  %data = bitcast i8* %raw to %ow.string*
+                  %refs = bitcast i8* %refsRaw to i32*
+                  store i32 1, i32* %refs
+                  %header = insertvalue %ow.strarray undef, i32 %length, 0
+                  %withData = insertvalue %ow.strarray %header, %ow.string* %data, 1
+                  %result = insertvalue %ow.strarray %withData, i32* %refs, 2
+                  ret %ow.strarray %result
+                }
+
+                define void @__ow_native_strarray_retain(%ow.strarray %array) {
+                entry:
+                  %refs = extractvalue %ow.strarray %array, 2
+                  %absent = icmp eq i32* %refs, null
+                  br i1 %absent, label %done, label %inc
+                inc:
+                  %old = load i32, i32* %refs
+                  %new = add i32 %old, 1
+                  store i32 %new, i32* %refs
+                  br label %done
+                done:
+                  ret void
+                }
+
+                define void @__ow_native_strarray_release(%ow.strarray %array) {
+                entry:
+                  %refs = extractvalue %ow.strarray %array, 2
+                  %absent = icmp eq i32* %refs, null
+                  br i1 %absent, label %done, label %dec
+                dec:
+                  %before = load i32, i32* %refs
+                  %after = sub i32 %before, 1
+                  store i32 %after, i32* %refs
+                  %last = icmp eq i32 %after, 0
+                  br i1 %last, label %startCleanup, label %done
+                startCleanup:
+                  %size = extractvalue %ow.strarray %array, 0
+                  %data = extractvalue %ow.strarray %array, 1
+                  br label %loop
+                loop:
+                  %i = phi i32 [ 0, %startCleanup ], [ %next, %releaseElement ]
+                  %hasNext = icmp slt i32 %i, %size
+                  br i1 %hasNext, label %releaseElement, label %dispose
+                releaseElement:
+                  %ptr = getelementptr %ow.string, %ow.string* %data, i32 %i
+                  %string = load %ow.string, %ow.string* %ptr
+                  call void @__ow_native_string_release(%ow.string %string)
+                  %next = add i32 %i, 1
+                  br label %loop
+                dispose:
+                  %rawData = bitcast %ow.string* %data to i8*
+                  call void @free(i8* %rawData)
+                  %rawRefs = bitcast i32* %refs to i8*
+                  call void @free(i8* %rawRefs)
+                  br label %done
+                done:
+                  ret void
+                }
+
+                """;
     }
 
     private static String nativeArrayHelpers() {
@@ -927,6 +1146,9 @@ public class LlvmIrGen {
         }
         if (declaredType.equals("array") || declaredType.equals("list")) {
             return "%ow.array";
+        }
+        if (declaredType.equals("string_array")) {
+            return "%ow.strarray";
         }
         if (declaredType.equals("string")) {
             return "%ow.string";

@@ -1,0 +1,50 @@
+name: OW native string arrays
+
+on:
+  pull_request:
+  push:
+    paths:
+      - 'src/**'
+      - 'examples/native_string_arrays*.ow'
+      - 'docs/native-string-arrays.md'
+      - '.github/workflows/native-string-arrays.yml'
+      - 'pom.xml'
+
+jobs:
+  string-arrays:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Run OW Maven/JUnit regressions
+        run: mvn -B clean package
+      - name: Generate LLVM and compile ASan/LSan binary
+        run: |
+          java -jar target/OwIDE.jar llvm examples/native_string_arrays.ow target/native-string-arrays.ll
+          clang -g -O0 -fsanitize=address -fno-omit-frame-pointer target/native-string-arrays.ll -o target/native-string-arrays
+      - name: Native runtime parity and leak checks
+        run: |
+          java -jar target/OwIDE.jar run examples/native_string_arrays.ow > target/string-arrays-interpreted.txt
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 ./target/native-string-arrays > target/string-arrays-native.txt
+          diff -u target/string-arrays-interpreted.txt target/string-arrays-native.txt
+          printf 'Hello Bob\nHello OW\nHello OW\n3\nHello OW\nnew value\n0\ny\nabcd\n' > target/string-arrays-expected.txt
+          diff -u target/string-arrays-expected.txt target/string-arrays-native.txt
+      - name: Bounds violations abort instead of accessing invalid memory
+        shell: bash
+        run: |
+          ulimit -c 0
+          java -jar target/OwIDE.jar llvm examples/native_string_arrays_oob.ow target/native-string-arrays-oob.ll
+          clang target/native-string-arrays-oob.ll -o target/native-string-arrays-oob
+          set +e
+          ./target/native-string-arrays-oob >/dev/null 2>&1
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "ERROR: out-of-bounds native string array access succeeded"
+            exit 1
+          fi
+          echo "Out-of-range string index rejected with exit code $status"

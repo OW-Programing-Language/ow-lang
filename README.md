@@ -91,9 +91,13 @@ The LLVM backend supports UTF-8 strings passed through typed functions
 `len(string)` with Java-compatible UTF-16 length semantics, and **native
 `string + string` concatenation** with reference-counted dynamic allocations.
 Run `ow llvm examples/native_dynamic_strings.ow`; compiled executables do
-not require a JVM. Native string arrays, dictionaries and mixed string/number
-concatenation remain unsupported. See
-[native strings and limitations](docs/native-strings.md) and
+not require a JVM. Native **arrays of strings** are now supported, with
+per-element reference counting, aliasing, indexed reads/writes, and
+`array(count, fill)`. The native ABI uses an explicit `string_array`
+signature for function parameters and returns. Mixed-type/nested arrays,
+dictionaries and mixed string/number concatenation remain unsupported. See
+[native string arrays](docs/native-string-arrays.md),
+[native string basics](docs/native-strings.md), and
 [dynamic string memory management](docs/native-dynamic-strings.md).
 
 ## YAML-style function signatures (preferred)

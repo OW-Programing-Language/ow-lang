@@ -64,12 +64,14 @@ public class NativeArrayLlvmTest {
         assertTrue(llvm.contains("insertvalue %ow.array undef, i32 0, 0"));
     }
 
-    @Test public void stringArraysFailRatherThanBeingMiscompiled() {
-        RuntimeException e = assertThrows(RuntimeException.class, () -> ir("""
+    @Test public void nativeStringArrayHasDistinctReferenceCountedAbi() {
+        String llvm = ir("""
                 main:
                   set names: ["one", "two"]
-                """));
-        assertTrue(e.getMessage().contains("only integers"));
+                  print: names[0]
+                """);
+        assertTrue(llvm.contains("%ow.strarray = type { i32, %ow.string*, i32* }"));
+        assertTrue(llvm.contains("call %ow.strarray @__ow_native_strarray_new(i32 2)"));
     }
 
     @Test public void stringLenUsesUtf16CodeUnitsRatherThanArrayHeader() {
@@ -87,6 +89,6 @@ public class NativeArrayLlvmTest {
                   set number: 12
                   print: number[0]
                 """));
-        assertTrue(e.getMessage().contains("requires an integer array"));
+        assertTrue(e.getMessage().contains("requires an integer or string array"));
     }
 }
