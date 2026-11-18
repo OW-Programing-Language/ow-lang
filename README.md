@@ -102,14 +102,15 @@ dictionaries and mixed string/number concatenation remain unsupported. See
 
 ## Native string-keyed dictionaries (experimental)
 
-OW's LLVM backend now supports a limited first dictionary runtime:
-**UTF-8 string keys and integer values**, with `map_get` (lazy fallback),
-`map_set`, `map_delete`, `map_size`, `map_has`, checked indexing, and
-reference-counted memory for the dictionary and dynamic keys. Use YAML-like
-literals such as `{ "Alice": 10, Bob: 20 }` or `{}`.
-Typed native function signatures use `int_map` for this subset.
-String-valued, nested and heterogeneous dictionaries remain interpreter-only.
-See [native dictionary limitations](docs/native-int-dictionaries.md).
+OW's experimental LLVM backend supports **UTF-8 string keys with
+homogeneous integer or string values**, `map_get` (lazy fallback), `map_set`,
+`map_delete`, `map_size`, `map_has` and dynamic indexing. YAML-like literals
+such as `{ "Alice": 10 }` and `{ "Alice": "hello" }` select the corresponding
+native representation. Typed native functions use `int_map` or `string_map`.
+Reference counting reclaims map entries and their managed string keys/values.
+Nested/heterogeneous dictionaries and iteration remain interpreter-only.
+See [native integer maps](docs/native-int-dictionaries.md) and
+[native string maps](docs/native-string-dictionaries.md).
 
 ## YAML-style function signatures (preferred)
 
