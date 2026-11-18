@@ -1,0 +1,40 @@
+# Native LLVM: reference-counted string arrays, aliases and typed functions.
+# Compare interpreter output with LLVM/Clang executable.
+fn greet(name: string):
+  returns: string
+  return: "Hello " + name
+
+fn make(count: int):
+  returns: string_array
+  return: array(count, greet("OW"))
+
+fn identity(values: string_array):
+  returns: string_array
+  return: values
+
+fn labelAt(values: string_array, index: int):
+  returns: string
+  return: values[index]
+
+main:
+  set names: ["Alice", greet("Bob"), "Charlie"]
+  print: names[1]
+  set alias: names
+  set names[1]: greet("OW")
+  print: alias[1]
+  set names: ["replacement"]
+  print: alias[1]
+  print: len(alias)
+
+  set dynamic: identity(make(3))
+  print: dynamic[2]
+  set dynamic[1]: "new" + " value"
+  print: labelAt(dynamic, 1)
+  print: len(array(0, ""))
+  print: ["x", "y"][1]
+
+  set i: 0
+  while: i < 50
+    set temp: array(3, "ab" + "cd")
+    set i: i + 1
+  print: temp[0]
