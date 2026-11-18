@@ -46,9 +46,10 @@ and returns in LLVM-compiled functions.
 **Limitations:** An empty `{}` defaults to `int_map`. To create an empty
 string map, start with a nonempty string-valued literal and delete its last
 entry; a typed empty-map constructor is planned. This backend currently uses
-an O(n) linked-list lookup; it does not yet implement a hash table,
-`map_keys`, `map_values`, `json`, mixed values, nested maps or object
-graphs. The interpreter supports those features.
+a shared [resizing hash-table runtime](native-hash-dictionaries.md),
+with average O(1) lookup, insertion and deletion. `map_keys`, `map_values`,
+`json`, nested maps and object graphs remain unsupported. Mixed integer/string
+values are now available using a separate `mixed_map` ABI. The interpreter supports those features.
 
 Native missing-key indexing terminates the process (instead of raising a
 catchable OW exception). Reference counters are non-atomic, so these maps
