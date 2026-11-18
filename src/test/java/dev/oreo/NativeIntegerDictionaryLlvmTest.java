@@ -112,12 +112,14 @@ public class NativeIntegerDictionaryLlvmTest {
         assertTrue(ll.contains("call void @__ow_native_intmap_release(%ow.intmap*"));
     }
 
-    @Test public void integerMapCannotReceiveStringValue() {
-        RuntimeException error = assertThrows(RuntimeException.class, () -> ir("""
+    @Test public void stringValuesSelectDistinctStringMapABI() {
+        String llvm = ir("""
                 main:
                   set m: { a: "hello" }
-                """));
-        assertTrue(error.getMessage().contains("require integer values"));
+                  print: m["a"]
+                """);
+        assertTrue(llvm.contains("call %ow.strmap* @__ow_native_strmap_new()"));
+        assertTrue(llvm.contains("call %ow.string @__ow_native_strmap_get("));
     }
 
     @Test public void integerMapCannotBeIndexedWithIntegerKey() {
