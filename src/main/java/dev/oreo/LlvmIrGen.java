@@ -976,6 +976,89 @@ public class LlvmIrGen {
         throw new IllegalStateException("Unsupported string_map operation: " + name);
     }
 
+    /** Heterogeneous dictionary builtins. All stored values are tagged and
+     * own their string reference when tag == 1. The runtime retains a value
+     * returned from a map before the map itself can be released.
+     */
+    private Value genMixedMapBuiltin(Ast.CallExpr call, Value map) {
+        String name = call.name;
+        if (name.equals("map_size")) {
+            String t = newTemp();
+            body.append("  ").append(t)
+                    .append(" = call i32 @__ow_native_mixedmap_size(%ow.mixedmap* ")
+                    .append(map.ref).append(")\n");
+            if (map.owned) releaseManaged(map);
+            return new Value(t, "i32");
+        }
+        Value key = mapKeyArgument(call, 1);
+        if (name.equals("map_set")) {
+            Value value = boxMixed(genExpr(call.args.get(2)));
+            if (!key.owned) retainManaged(key);
+            body.append("  call void @__ow_native_mixedmap_set(%ow.mixedmap* ")
+                    .append(map.ref).append(", %ow.string ").append(key.ref)
+                    .append(", %ow.mixed ").append(value.ref).append(")\n");
+            return map;
+        }
+        if (name.equals("map_delete")) {
+            body.append("  call void @__ow_native_mixedmap_delete(%ow.mixedmap* ")
+                    .append(map.ref).append(", %ow.string ").append(key.ref).append(")\n");
+            if (key.owned) releaseManaged(key);
+            return map;
+        }
+        if (name.equals("map_has")) {
+            String t = newTemp();
+            body.append("  ").append(t)
+                    .append(" = call i1 @__ow_native_mixedmap_has(%ow.mixedmap* ")
+                    .append(map.ref).append(", %ow.string ").append(key.ref).append(")\n");
+            if (key.owned) releaseManaged(key);
+            if (map.owned) releaseManaged(map);
+            return new Value(t, "i1");
+        }
+        if (name.equals("map_get")) {
+            String found = newTemp();
+            body.append("  ").append(found)
+                    .append(" = call %ow.mixedmap.entry* @__ow_native_mixedmap_find(%ow.mixedmap* ")
+                    .append(map.ref).append(", %ow.string ").append(key.ref).append(")\n");
+            String exists = newTemp();
+            body.append("  ").append(exists)
+                    .append(" = icmp ne %ow.mixedmap.entry* ")
+                    .append(found).append(", null\n");
+            int id = labelId++;
+            String has = "mixedmap.get.present." + id;
+            String absent = "mixedmap.get.absent." + id;
+            String done = "mixedmap.get.end." + id;
+            String slot = newTemp();
+            entryAllocs.append("  ").append(slot).append(" = alloca %ow.mixed\n");
+            body.append("  br i1 ").append(exists).append(", label %")
+                    .append(has).append(", label %").append(absent).append("\n");
+            body.append(has).append(":\n");
+            String ptr = newTemp();
+            body.append("  ").append(ptr)
+                    .append(" = getelementptr %ow.mixedmap.entry, %ow.mixedmap.entry* ")
+                    .append(found).append(", i32 0, i32 1\n");
+            String stored = newTemp();
+            body.append("  ").append(stored)
+                    .append(" = load %ow.mixed, %ow.mixed* ").append(ptr).append("\n");
+            retainManaged(new Value(stored, "%ow.mixed"));
+            body.append("  store %ow.mixed ").append(stored)
+                    .append(", %ow.mixed* ").append(slot).append("\n");
+            body.append("  br label %").append(done).append("\n");
+            body.append(absent).append(":\n");
+            Value fallback = boxMixed(genExpr(call.args.get(2)));
+            body.append("  store %ow.mixed ").append(fallback.ref)
+                    .append(", %ow.mixed* ").append(slot).append("\n");
+            body.append("  br label %").append(done).append("\n");
+            body.append(done).append(":\n");
+            String result = newTemp();
+            body.append("  ").append(result)
+                    .append(" = load %ow.mixed, %ow.mixed* ").append(slot).append("\n");
+            if (key.owned) releaseManaged(key);
+            if (map.owned) releaseManaged(map);
+            return new Value(result, "%ow.mixed", true);
+        }
+        throw new IllegalStateException("Unsupported mixed_map builtin: " + name);
+    }
+
     private Value allocatedArrayData(int count) {
         return allocatedArrayDataRaw(Integer.toString(Math.max(1, count)));
     }
