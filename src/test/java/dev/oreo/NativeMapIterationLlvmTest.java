@@ -161,7 +161,7 @@ public class NativeMapIterationLlvmTest {
                   print: entries(m)[0]
                 """);
         assertTrue(ll.contains("define %ow.mixedarray @entries(%ow.mixedmap* %m.arg)"));
-        assertTrue(ll.contains("call void @__ow_native_mixedarray_retain("));
+        assertTrue(ll.contains("call %ow.mixedarray @entries("));
         assertTrue(ll.contains("call void @__ow_native_mixedarray_release("));
     }
 }
