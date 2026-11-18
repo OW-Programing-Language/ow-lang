@@ -1,0 +1,4 @@
+# Missing key must abort in native mode.
+main:
+  set config: { name: "OW", version: 6 }
+  print: config["missing"]
