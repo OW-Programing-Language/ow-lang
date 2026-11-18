@@ -1,0 +1,49 @@
+name: OW native map iteration
+
+on:
+  pull_request:
+  push:
+    paths:
+      - 'src/**'
+      - 'examples/native_map_iteration*'
+      - 'docs/native-map-iteration.md'
+      - '.github/workflows/native-map-iteration.yml'
+      - 'pom.xml'
+
+jobs:
+  map-iteration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Run all OW compiler regressions
+        run: mvn -B clean package
+      - name: Compile iteration sample with Clang sanitizers
+        run: |
+          java -jar target/OwIDE.jar llvm examples/native_map_iteration.ow target/native-map-iteration.ll
+          clang -g -O0 -fsanitize=address -fno-omit-frame-pointer target/native-map-iteration.ll -o target/native-map-iteration
+      - name: Check exact insertion order, interpreter parity and memory
+        run: |
+          java -jar target/OwIDE.jar run examples/native_map_iteration.ow > target/map-iteration-interpreter.txt
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 ./target/native-map-iteration > target/map-iteration-native.txt
+          diff -u target/map-iteration-interpreter.txt target/map-iteration-native.txt
+          diff -u examples/native_map_iteration.expected target/map-iteration-native.txt
+      - name: Out-of-bounds mixed array indexing aborts safely
+        shell: bash
+        run: |
+          ulimit -c 0
+          java -jar target/OwIDE.jar llvm examples/native_map_iteration_oob.ow target/map-iteration-oob.ll
+          clang target/map-iteration-oob.ll -o target/map-iteration-oob
+          set +e
+          ./target/map-iteration-oob > /dev/null 2>&1
+          code=$?
+          set -e
+          if [ "$code" -eq 0 ]; then
+            echo "ERROR: out-of-bounds mixed array indexing succeeded"
+            exit 1
+          fi
+          echo "Invalid mixed array index rejected with exit status $code"
