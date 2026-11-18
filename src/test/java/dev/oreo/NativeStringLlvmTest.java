@@ -34,7 +34,10 @@ public class NativeStringLlvmTest {
                     print: 2
                 """);
         assertTrue(llvm.contains("declare i32 @strcmp(i8*, i8*)"));
-        assertEquals(2, llvm.split("call i32 @strcmp\\(", -1).length - 1);
+        // Runtime helpers may also compare dictionary keys; count only the
+        // string comparisons emitted inside the tested main function.
+        String main = llvm.substring(llvm.indexOf("define i32 @main()"));
+        assertEquals(2, main.split("call i32 @strcmp\\(", -1).length - 1);
         assertTrue(llvm.contains(" = icmp eq i32 "));
         assertTrue(llvm.contains(" = icmp ne i32 "));
     }
