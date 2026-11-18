@@ -31,10 +31,16 @@ final class NativeMixedMapIr {
                 entry:
                   %tag = extractvalue %ow.mixed %value, 0
                   %isString = icmp eq i32 %tag, 1
-                  br i1 %isString, label %retainString, label %done
+                  br i1 %isString, label %retainString, label %checkMap
                 retainString:
                   %text = extractvalue %ow.mixed %value, 2
                   call void @__ow_native_string_retain(%ow.string %text)
+                  br label %done
+                checkMap:
+                  %mapTag = icmp uge i32 %tag, 2
+                  br i1 %mapTag, label %retainMap, label %done
+                retainMap:
+                  call void @__ow_native_nested_retain(%ow.mixed %value)
                   br label %done
                 done:
                   ret void
@@ -44,10 +50,16 @@ final class NativeMixedMapIr {
                 entry:
                   %tag = extractvalue %ow.mixed %value, 0
                   %isString = icmp eq i32 %tag, 1
-                  br i1 %isString, label %releaseString, label %done
+                  br i1 %isString, label %releaseString, label %checkMap
                 releaseString:
                   %text = extractvalue %ow.mixed %value, 2
                   call void @__ow_native_string_release(%ow.string %text)
+                  br label %done
+                checkMap:
+                  %mapTag = icmp uge i32 %tag, 2
+                  br i1 %mapTag, label %releaseMap, label %done
+                releaseMap:
+                  call void @__ow_native_nested_release(%ow.mixed %value)
                   br label %done
                 done:
                   ret void
@@ -57,7 +69,13 @@ final class NativeMixedMapIr {
                 entry:
                   %tag = extractvalue %ow.mixed %value, 0
                   %isString = icmp eq i32 %tag, 1
-                  br i1 %isString, label %string, label %integer
+                  br i1 %isString, label %string, label %checkNumber
+                checkNumber:
+                  %isInt = icmp eq i32 %tag, 0
+                  br i1 %isInt, label %integer, label %notScalar
+                notScalar:
+                  call void @abort()
+                  unreachable
                 string:
                   %text = extractvalue %ow.mixed %value, 2
                   %bytes = extractvalue %ow.string %text, 0
