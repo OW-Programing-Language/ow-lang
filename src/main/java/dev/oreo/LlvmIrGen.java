@@ -363,10 +363,14 @@ public class LlvmIrGen {
             // [] keeps its existing integer-array type. Nonempty literals
             // select integer vs string elements from the first expression.
             int count = a.elements.size();
-            if (count > 0 && isStringArrayElement(a.elements.get(0))) {
+            // Evaluate the first element only once, then determine its type.
+            // This supports variables, string-producing calls and expressions
+            // without guessing from AST syntax or duplicating side effects.
+            Value first = count > 0 ? genExpr(a.elements.get(0)) : null;
+            if (first != null && first.type.equals("%ow.string")) {
                 Value array = allocateStringArray(Integer.toString(count));
                 for (int i = 0; i < count; i++) {
-                    Value element = genExpr(a.elements.get(i));
+                    Value element = i == 0 ? first : genExpr(a.elements.get(i));
                     if (!element.type.equals("%ow.string")) {
                         throw new RuntimeException("LLVM backend: mixed integer/string array literal");
                     }
@@ -381,7 +385,7 @@ public class LlvmIrGen {
             // Integer arrays retain the previous native ABI and behavior.
             Value storage = allocatedArrayData(count);
             for (int i = 0; i < count; i++) {
-                Value element = genExpr(a.elements.get(i));
+                Value element = i == 0 ? first : genExpr(a.elements.get(i));
                 if (!element.type.equals("i32")) {
                     throw new RuntimeException("LLVM backend: mixed or unsupported array literal element types");
                 }
@@ -676,6 +680,64 @@ public class LlvmIrGen {
         body.append(end).append(":\n");
     }
 
+    /** Native string arrays are separately typed to protect the integer
+     * array ABI and ensure their child string references can be released.
+     * The runtime allocates zero-initialized element slots and one owner.
+     */
+    private Value allocateStringArray(String length) {
+        String result = newTemp();
+        body.append("  ").append(result)
+                .append(" = call %ow.strarray @__ow_native_strarray_new(i32 ")
+                .append(length).append(")\n");
+        return new Value(result, "%ow.strarray", true);
+    }
+
+    private String stringArrayElementPointer(Value array, String index) {
+        String storage = newTemp();
+        body.append("  ").append(storage).append(" = extractvalue %ow.strarray ")
+                .append(array.ref).append(", 1\n");
+        String ptr = newTemp();
+        body.append("  ").append(ptr)
+                .append(" = getelementptr %ow.string, %ow.string* ")
+                .append(storage).append(", i32 ").append(index).append("\n");
+        return ptr;
+    }
+
+    /** Each element retains the one fill value: filling a string array
+     * must never give multiple slots the same single owned reference.
+     * Finally release the fill temporary once (handled by the caller).
+     */
+    private void fillStringArray(Value array, Value count, Value fill) {
+        int id = labelId++;
+        String start = "strarray.fill.start." + id;
+        String condition = "strarray.fill.cond." + id;
+        String loop = "strarray.fill.body." + id;
+        String end = "strarray.fill.end." + id;
+        String counter = newTemp();
+        String next = newTemp();
+        body.append("  br label %").append(start).append("\n");
+        body.append(start).append(":\n");
+        body.append("  br label %").append(condition).append("\n");
+        body.append(condition).append(":\n");
+        body.append("  ").append(counter).append(" = phi i32 [ 0, %")
+                .append(start).append(" ], [ ").append(next)
+                .append(", %").append(loop).append(" ]\n");
+        String isLess = newTemp();
+        body.append("  ").append(isLess).append(" = icmp slt i32 ")
+                .append(counter).append(", ").append(count.ref).append("\n");
+        body.append("  br i1 ").append(isLess).append(", label %")
+                .append(loop).append(", label %").append(end).append("\n");
+        body.append(loop).append(":\n");
+        retainManaged(fill);
+        String ptr = stringArrayElementPointer(array, counter);
+        body.append("  store %ow.string ").append(fill.ref)
+                .append(", %ow.string* ").append(ptr).append("\n");
+        body.append("  ").append(next).append(" = add i32 ")
+                .append(counter).append(", 1\n");
+        body.append("  br label %").append(condition).append("\n");
+        body.append(end).append(":\n");
+    }
+
     private Value buildArrayValue(String length, String data) {
         // A newly created native array owns exactly one reference. Each
         // independently allocated refcount is freed with its backing store.
@@ -814,6 +876,101 @@ public class LlvmIrGen {
             if (isManaged(entry.getValue()))
                 releaseManagedFromSlot(locals.get(entry.getKey()), entry.getValue());
         }
+    }
+
+    /** Managed string-array runtime. A string_array owns its elements:
+     * last owner destruction walks every child and releases the string.
+     * Works with statically allocated literals and heap string concat values.
+     */
+    private static String nativeStringArrayHelpers() {
+        return """
+                define %ow.strarray @__ow_native_strarray_new(i32 %length) {
+                entry:
+                  %validLength = icmp sge i32 %length, 0
+                  br i1 %validLength, label %allocation, label %invalid
+                invalid:
+                  call void @abort()
+                  unreachable
+                allocation:
+                  %empty = icmp eq i32 %length, 0
+                  %slots = select i1 %empty, i32 1, i32 %length
+                  %slots64 = zext i32 %slots to i64
+                  %elementEnd = getelementptr %ow.string, %ow.string* null, i32 1
+                  %elementSize = ptrtoint %ow.string* %elementEnd to i64
+                  %raw = call i8* @calloc(i64 %slots64, i64 %elementSize)
+                  %allocated = icmp ne i8* %raw, null
+                  br i1 %allocated, label %allocateRefs, label %oom
+                oom:
+                  call void @abort()
+                  unreachable
+                allocateRefs:
+                  %refsRaw = call i8* @calloc(i64 1, i64 4)
+                  %refsValid = icmp ne i8* %refsRaw, null
+                  br i1 %refsValid, label %ready, label %refsOom
+                refsOom:
+                  call void @free(i8* %raw)
+                  call void @abort()
+                  unreachable
+                ready:
+                  %data = bitcast i8* %raw to %ow.string*
+                  %refs = bitcast i8* %refsRaw to i32*
+                  store i32 1, i32* %refs
+                  %header = insertvalue %ow.strarray undef, i32 %length, 0
+                  %withData = insertvalue %ow.strarray %header, %ow.string* %data, 1
+                  %result = insertvalue %ow.strarray %withData, i32* %refs, 2
+                  ret %ow.strarray %result
+                }
+
+                define void @__ow_native_strarray_retain(%ow.strarray %array) {
+                entry:
+                  %refs = extractvalue %ow.strarray %array, 2
+                  %absent = icmp eq i32* %refs, null
+                  br i1 %absent, label %done, label %inc
+                inc:
+                  %old = load i32, i32* %refs
+                  %new = add i32 %old, 1
+                  store i32 %new, i32* %refs
+                  br label %done
+                done:
+                  ret void
+                }
+
+                define void @__ow_native_strarray_release(%ow.strarray %array) {
+                entry:
+                  %refs = extractvalue %ow.strarray %array, 2
+                  %absent = icmp eq i32* %refs, null
+                  br i1 %absent, label %done, label %dec
+                dec:
+                  %before = load i32, i32* %refs
+                  %after = sub i32 %before, 1
+                  store i32 %after, i32* %refs
+                  %last = icmp eq i32 %after, 0
+                  br i1 %last, label %startCleanup, label %done
+                startCleanup:
+                  %size = extractvalue %ow.strarray %array, 0
+                  %data = extractvalue %ow.strarray %array, 1
+                  br label %loop
+                loop:
+                  %i = phi i32 [ 0, %startCleanup ], [ %next, %releaseElement ]
+                  %hasNext = icmp slt i32 %i, %size
+                  br i1 %hasNext, label %releaseElement, label %dispose
+                releaseElement:
+                  %ptr = getelementptr %ow.string, %ow.string* %data, i32 %i
+                  %string = load %ow.string, %ow.string* %ptr
+                  call void @__ow_native_string_release(%ow.string %string)
+                  %next = add i32 %i, 1
+                  br label %loop
+                dispose:
+                  %rawData = bitcast %ow.string* %data to i8*
+                  call void @free(i8* %rawData)
+                  %rawRefs = bitcast i32* %refs to i8*
+                  call void @free(i8* %rawRefs)
+                  br label %done
+                done:
+                  ret void
+                }
+
+                """;
     }
 
     private static String nativeArrayHelpers() {
