@@ -1,0 +1,4 @@
+# A mixed-array snapshot rejects out-of-bounds indexing.
+main:
+  set snapshot: map_values({ one: 1, two: "two" })
+  print: snapshot[2]
