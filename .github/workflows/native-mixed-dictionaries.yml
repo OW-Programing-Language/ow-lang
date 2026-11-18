@@ -1,0 +1,50 @@
+name: OW native mixed dictionaries
+
+on:
+  pull_request:
+  push:
+    paths:
+      - 'src/**'
+      - 'examples/native_mixed_dictionaries*.ow'
+      - 'docs/native-mixed-dictionaries.md'
+      - '.github/workflows/native-mixed-dictionaries.yml'
+      - 'pom.xml'
+
+jobs:
+  mixed-dictionaries:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Build OW and run Java tests
+        run: mvn -B clean package
+      - name: Generate LLVM and compile ASan/LSan executable
+        run: |
+          java -jar target/OwIDE.jar llvm examples/native_mixed_dictionaries.ow target/native-mixed-dictionaries.ll
+          clang -g -O0 -fsanitize=address -fno-omit-frame-pointer target/native-mixed-dictionaries.ll -o target/native-mixed-dictionaries
+      - name: Compare native and interpreter results, check memory
+        run: |
+          java -jar target/OwIDE.jar run examples/native_mixed_dictionaries.ow > target/mixed-interpreted.txt
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 ./target/native-mixed-dictionaries > target/mixed-native.txt
+          diff -u target/mixed-interpreted.txt target/mixed-native.txt
+          printf 'OW\n6\nOW\nsix\n2\ntrue\nfalse\nOW\nfallback executed\nnot found\n42\n2\nOW\nété🙂\nnext\ntemporary\nloop value\n39\n' > target/mixed-expected.txt
+          diff -u target/mixed-expected.txt target/mixed-native.txt
+      - name: Missing key must fail rather than access invalid memory
+        shell: bash
+        run: |
+          ulimit -c 0
+          java -jar target/OwIDE.jar llvm examples/native_mixed_dictionaries_missing.ow target/mixed-missing.ll
+          clang target/mixed-missing.ll -o target/mixed-missing
+          set +e
+          ./target/mixed-missing >/dev/null 2>&1
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "ERROR: missing map key unexpectedly succeeded"
+            exit 1
+          fi
+          echo "Missing key rejected with exit code $status"
