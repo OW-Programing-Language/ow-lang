@@ -1,0 +1,48 @@
+# Native OW tagged dictionaries: heterogeneous integer and UTF-8 string values.
+fn make():
+  returns: mixed_map
+  return: { name: "OW", version: 6 }
+
+fn peek(data: mixed_map):
+  returns: mixed
+  return: data["name"]
+
+fn fallback():
+  returns: string
+  print: "fallback executed"
+  return: "default"
+
+main:
+  set config: make()
+  print: config["name"]
+  print: config["version"]
+  set alias: config
+  set config["name"]: "O" + "W"
+  set config["version"]: "six"
+  print: alias["name"]
+  print: alias["version"]
+  print: map_size(config)
+  print: map_has(config, "name")
+  print: map_has(config, "unknown")
+
+  print: map_get(config, "name", fallback())
+  print: map_get(config, "missing", "not" + " found")
+  set config: map_set(config, "count", 42)
+  print: config["count"]
+  set config: map_delete(config, "name")
+  print: map_size(config)
+  print: peek(make())
+
+  set unicode: { year: 2026, text: "été" + "🙂" }
+  print: unicode["text"]
+  set unicode["year"]: "next"
+  print: unicode["year"]
+
+  print: { x: "temporary", n: 3 }["x"]
+
+  set i: 0
+  while: i < 40
+    set current: { number: i, text: "loop" + " value" }
+    set i: i + 1
+  print: current["text"]
+  print: current["number"]
