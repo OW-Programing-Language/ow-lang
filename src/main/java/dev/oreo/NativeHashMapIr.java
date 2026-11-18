@@ -379,10 +379,10 @@ final class NativeHashMapIr {
             // All accepted container graphs therefore remain acyclic and
             // can be reclaimed recursively by reference counting.
             String setEntry = "define void @__ow_native_mixedmap_set(%ow.mixedmap* %map, "
-                    + "%ow.string %key, %ow.mixed %value) {\\n"
-                    + "entry:\\n";
+                    + "%ow.string %key, %ow.mixed %value) {\n"
+                    + "entry:\n";
             String check = "  call void @__ow_native_nested_guard_cycle(%ow.mixedmap* "
-                    + "%map, %ow.mixed %value)\\n";
+                    + "%map, %ow.mixed %value)\n";
             if (!ir.contains(setEntry)) {
                 throw new IllegalStateException("Native mixed-map setter ABI changed");
             }
