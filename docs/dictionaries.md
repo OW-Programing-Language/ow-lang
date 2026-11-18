@@ -136,8 +136,10 @@ mutation and `map_size`, `map_has`, `map_get` (lazy fallback), `map_set`
 and `map_delete`. Mixed maps use tagged values with managed UTF-8 strings.
 This implementation uses a shared reference-counted, resizing UTF-8
 [hash-table backend](native-hash-dictionaries.md) with average O(1) lookup,
-insertion and deletion. `map_keys`, `map_values`,
-arbitrary object values and JSON remain interpreter-only. Native
+insertion and deletion. `map_keys` and `map_values` now preserve
+insertion order in native code, returning managed snapshots; see
+[native dictionary iteration](native-map-iteration.md). Arbitrary object
+values and JSON remain interpreter-only. Native
 nested dictionary values are supported with cycle prevention; see
 [native nested dictionaries](native-nested-maps.md). Also see
 [native mixed dictionaries](native-mixed-dictionaries.md),
