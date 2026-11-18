@@ -1,0 +1,47 @@
+# YAML-style OW dictionaries compiled with LLVM and reference-counted strings.
+fn fallback():
+  returns: string
+  print: "UNEXPECTED FALLBACK"
+  return: "unused"
+
+fn make():
+  returns: string_map
+  return: { "Blaze": "mob/blaze", "Zombie": "mob/zombie" }
+
+fn lookup(m: string_map, key: string):
+  returns: string
+  return: map_get(m, key, "missing")
+
+main:
+  set paths: make()
+  print: paths["Blaze"]
+  set shared: paths
+  set key: "Mag" + "ma"
+  set shared[key]: "hot" + ".png"
+  print: paths["Magma"]
+  print: map_size(paths)
+  print: map_has(paths, "Magma")
+  print: map_has(paths, "Absent")
+
+  set paths["Blaze"]: paths["Blaze"]
+  print: paths["Blaze"]
+  set paths["Blaze"]: "hot" + "ter"
+  print: shared["Blaze"]
+  print: map_get(paths, "Zombie", fallback())
+  print: map_get(paths, "Absent", "none")
+
+  set shared: map_delete(shared, "Zombie")
+  print: map_size(paths)
+  set single: map_set({ first: "one" }, "Key" + " One", "forty" + "four")
+  print: single["Key One"]
+  print: lookup(make(), "Blaze")
+  print: map_get({ a: "x" + "y" }, "a", "?")
+  set overwritten: { same: "old" + "!" }
+  set overwritten["same"]: "new" + "!"
+  print: overwritten["same"]
+
+  set i: 0
+  while: i < 40
+    set rotating: { key: "v" + "alue" }
+    set i: i + 1
+  print: rotating["key"]
