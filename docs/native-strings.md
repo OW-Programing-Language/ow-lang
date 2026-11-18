@@ -37,10 +37,14 @@ for interpreter/native output parity.
   reference counting, so local variables, aliases, nested temporaries,
   and function returns release allocations when no longer owned.
 
+Native arrays of strings are covered separately in the
+[string-array LLVM guide](native-string-arrays.md), including per-element ARC,
+mutation, dynamic filling and explicit `string_array` function types.
+
 ## Limitations
 
 - **Dynamic `string + string` is supported**, but native string builders,
-  input strings, string arrays and dictionaries are not supported yet.
+  input strings, dictionaries are not supported yet; string arrays use a separate native type.
   A length-aware string representation is still planned.
 - Embedded NUL characters are rejected by the compiler because C-string
   `strcmp` and the scanner would otherwise silently truncate the value.
