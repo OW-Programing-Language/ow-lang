@@ -1132,16 +1132,16 @@ public class LlvmIrGen {
                   %head = load %ow.intmap.entry*, %ow.intmap.entry** %headPtr
                   br label %loop
                 loop:
-                  %entry = phi %ow.intmap.entry* [ %head, %startCleanup ], [ %next, %freeNode ]
-                  %empty = icmp eq %ow.intmap.entry* %entry, null
+                  %nodeToFree = phi %ow.intmap.entry* [ %head, %startCleanup ], [ %next, %freeNode ]
+                  %empty = icmp eq %ow.intmap.entry* %nodeToFree, null
                   br i1 %empty, label %disposeMap, label %freeNode
                 freeNode:
-                  %keyPtr = getelementptr %ow.intmap.entry, %ow.intmap.entry* %entry, i32 0, i32 0
+                  %keyPtr = getelementptr %ow.intmap.entry, %ow.intmap.entry* %nodeToFree, i32 0, i32 0
                   %key = load %ow.string, %ow.string* %keyPtr
                   call void @__ow_native_string_release(%ow.string %key)
-                  %nextPtr = getelementptr %ow.intmap.entry, %ow.intmap.entry* %entry, i32 0, i32 2
+                  %nextPtr = getelementptr %ow.intmap.entry, %ow.intmap.entry* %nodeToFree, i32 0, i32 2
                   %next = load %ow.intmap.entry*, %ow.intmap.entry** %nextPtr
-                  %rawNode = bitcast %ow.intmap.entry* %entry to i8*
+                  %rawNode = bitcast %ow.intmap.entry* %nodeToFree to i8*
                   call void @free(i8* %rawNode)
                   br label %loop
                 disposeMap:
