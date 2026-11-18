@@ -130,10 +130,12 @@ See `examples/mob_sprites.ow` for the full MobArt example.
 
 The **interpreter** supports all dictionary functionality above, including
 heterogeneous values, nested dictionaries, insertion-order iteration and JSON.
-The experimental native **LLVM** backend now supports dictionaries with **string
-keys and integer values**, checked dynamic indexing, mutation, `map_size`,
-`map_has`, `map_get` with lazy fallback, `map_set` and `map_delete`.
+The experimental native **LLVM** backend supports **string-keyed
+homogeneous integer or string values**, checked dynamic indexing, mutation,
+`map_size`, `map_has`, `map_get` with lazy fallback, `map_set` and
+`map_delete`.
 Its first implementation uses reference-counted linked-list entries (O(n)
 lookup, unlike the interpreter's average O(1) hash table). `map_keys`,
-`map_values`, heterogeneous values and JSON remain interpreter-only. See
-[native integer-valued dictionaries](native-int-dictionaries.md).
+`map_values`, heterogeneous values, nested objects and JSON remain
+interpreter-only. See [native integer-valued dictionaries](native-int-dictionaries.md)
+and [native string-valued dictionaries](native-string-dictionaries.md).

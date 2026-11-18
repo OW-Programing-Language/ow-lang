@@ -35,11 +35,11 @@ main:
 
 ## Important limitations
 
-**This is a first native dictionary subset, not parity with the full OW
-interpreter.** Dictionary values must be **integers**; string values,
-heterogeneous/nested values, objects, null, and floating-point values are
-not yet supported by the LLVM backend. The interpreter continues to support
-them.
+**This is a native integer-dictionary subset, not parity with the full OW
+interpreter.** String-valued dictionaries now have a separate experimental
+`string_map` ABI; see [native string dictionaries](native-string-dictionaries.md).
+Heterogeneous/nested values, objects, null, and floating-point values are
+not yet supported by the LLVM backend. The interpreter supports them.
 
 The LLVM implementation currently uses a *linked-list search* over dictionary
 entries rather than a hash table. Lookup/insertion is O(n), whereas the

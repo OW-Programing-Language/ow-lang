@@ -1,0 +1,4 @@
+# Native map index must exit nonzero on a missing string key.
+main:
+  set data: { name: "OW" }
+  print: data["unknown"]

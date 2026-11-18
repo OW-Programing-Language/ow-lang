@@ -1,0 +1,50 @@
+name: OW native string-valued dictionaries
+
+on:
+  pull_request:
+  push:
+    paths:
+      - 'src/**'
+      - 'examples/native_string_dictionaries*.ow'
+      - 'docs/native-string-dictionaries.md'
+      - '.github/workflows/native-string-dictionaries.yml'
+      - 'pom.xml'
+
+jobs:
+  native-string-dictionaries:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Build OW and run Java regression suite
+        run: mvn -B clean package
+      - name: Generate native LLVM and build with sanitizers
+        run: |
+          java -jar target/OwIDE.jar llvm examples/native_string_dictionaries.ow target/native-string-dictionaries.ll
+          clang -g -O0 -fsanitize=address -fno-omit-frame-pointer target/native-string-dictionaries.ll -o target/native-string-dictionaries
+      - name: Compare interpreter/native parity and check for leaks
+        run: |
+          java -jar target/OwIDE.jar run examples/native_string_dictionaries.ow > target/stringmap-interpreted.txt
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 ./target/native-string-dictionaries > target/stringmap-native.txt
+          diff -u target/stringmap-interpreted.txt target/stringmap-native.txt
+          printf 'mob/blaze\nhot.png\n3\ntrue\nfalse\nmob/blaze\nhotter\nmob/zombie\nnone\n2\nfortyfour\nmob/blaze\nxy\nnew!\nvalue\n' > target/stringmap-expected.txt
+          diff -u target/stringmap-expected.txt target/stringmap-native.txt
+      - name: Reject missing dictionary keys safely
+        shell: bash
+        run: |
+          ulimit -c 0
+          java -jar target/OwIDE.jar llvm examples/native_string_dictionaries_missing.ow target/stringmap-missing.ll
+          clang target/stringmap-missing.ll -o target/stringmap-missing
+          set +e
+          ./target/stringmap-missing > /dev/null 2>&1
+          code=$?
+          set -e
+          if [ "$code" -eq 0 ]; then
+            echo "Missing string-map key unexpectedly succeeded"
+            exit 1
+          fi
+          echo "Missing string-map key rejected with exit status $code"

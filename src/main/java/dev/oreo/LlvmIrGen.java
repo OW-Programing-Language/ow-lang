@@ -40,7 +40,8 @@ public class LlvmIrGen {
         for (Ast.FnDecl fn : program.functions) {
             if (fn.name.startsWith("__ow_native_array_") || fn.name.startsWith("__ow_native_string_")
                     || fn.name.startsWith("__ow_native_strarray_")
-                    || fn.name.startsWith("__ow_native_intmap_")) {
+                    || fn.name.startsWith("__ow_native_intmap_")
+                    || fn.name.startsWith("__ow_native_strmap_")) {
                 throw new RuntimeException("LLVM backend: reserved native runtime function name: " + fn.name);
             }
             if (!functionNames.add(fn.name)) {
@@ -71,6 +72,8 @@ public class LlvmIrGen {
         // First native dictionary subset: string keys, i32 values.
         out.append("%ow.intmap.entry = type { %ow.string, i32, %ow.intmap.entry* }\n");
         out.append("%ow.intmap = type { %ow.intmap.entry*, i32, i32 }\n");
+        out.append("%ow.strmap.entry = type { %ow.string, %ow.string, %ow.strmap.entry* }\n");
+        out.append("%ow.strmap = type { %ow.strmap.entry*, i32, i32 }\n");
         out.append("declare i8* @calloc(i64, i64)\n");
         out.append("declare void @free(i8*)\n");
         out.append("declare void @abort() noreturn\n");
@@ -85,6 +88,7 @@ public class LlvmIrGen {
         out.append(nativeOwnedStringHelpers());
         out.append(nativeStringArrayHelpers());
         out.append(nativeIntegerMapHelpers());
+        out.append(NativeStringMapIr.generate());
         out.append(fnsCode);
         return out.toString();
     }
@@ -151,8 +155,9 @@ public class LlvmIrGen {
             body.append("  ret ").append(currentReturnType).append(" zeroinitializer\n");
         } else if (currentReturnType.equals("%ow.string")) {
             body.append("  ret %ow.string zeroinitializer\n");
-        } else if (currentReturnType.equals("%ow.intmap*")) {
-            body.append("  ret %ow.intmap* null\n");
+        } else if (currentReturnType.equals("%ow.intmap*")
+                || currentReturnType.equals("%ow.strmap*")) {
+            body.append("  ret ").append(currentReturnType).append(" null\n");
         } else {
             body.append("  ret i32 0\n");
         }
@@ -222,17 +227,24 @@ public class LlvmIrGen {
             // OW evaluates the container and index before the assigned value.
             Value array = genExpr(new Ast.Var(set.name));
             Value index = genExpr(set.index);
-            if (array.type.equals("%ow.intmap*")) {
+            if (array.type.equals("%ow.intmap*") || array.type.equals("%ow.strmap*")) {
                 requireIntegerMapKey(index);
                 Value value = genExpr(set.value);
-                if (!value.type.equals("i32")) {
-                    throw new RuntimeException("LLVM backend: native dictionaries currently require integer values");
+                String expected = array.type.equals("%ow.intmap*") ? "i32" : "%ow.string";
+                if (!value.type.equals(expected)) {
+                    throw new RuntimeException("LLVM backend: native dictionary requires "
+                            + (expected.equals("i32") ? "integer" : "string") + " values");
                 }
-                // map_set takes ownership of exactly one key reference.
+                // Map operations consume one owned key and (for strmap)
+                // one owned string value. Borrowed values need a retain.
                 if (!index.owned) retainManaged(index);
-                body.append("  call void @__ow_native_intmap_set(%ow.intmap* ")
-                        .append(array.ref).append(", %ow.string ")
-                        .append(index.ref).append(", i32 ").append(value.ref).append(")\n");
+                if (value.type.equals("%ow.string") && !value.owned) retainManaged(value);
+                String kind = expected.equals("i32") ? "intmap" : "strmap";
+                body.append("  call void @__ow_native_").append(kind).append("_set(")
+                        .append(array.type).append(" ").append(array.ref)
+                        .append(", %ow.string ").append(index.ref)
+                        .append(", ").append(expected).append(" ")
+                        .append(value.ref).append(")\n");
                 return;
             }
             String elementPtr = checkedArrayElement(array, index);
@@ -435,19 +447,34 @@ public class LlvmIrGen {
             return buildArrayValue(Integer.toString(count), storage.ref);
         }
         if (e instanceof Ast.MapLit map) {
-            Value dictionary = createIntegerMap();
+            // Literal values determine the homogeneous native map ABI.
+            // The first value is generated once, preserving any side effects.
+            // An empty {} retains its previous integer-map type.
+            Value dictionary = null;
+            String elementType = null;
             for (int i = 0; i < map.keys.size(); i++) {
                 Value key = genExpr(new Ast.StringLit(map.keys.get(i)));
                 Value val = genExpr(map.values.get(i));
-                if (!val.type.equals("i32")) {
-                    throw new RuntimeException("LLVM backend: native dictionary literals currently require integer values");
+                if (dictionary == null) {
+                    if (!val.type.equals("i32") && !val.type.equals("%ow.string")) {
+                        throw new RuntimeException("LLVM backend: native dictionaries require integer or string values");
+                    }
+                    elementType = val.type;
+                    dictionary = elementType.equals("i32") ? createIntegerMap() : createStringMap();
+                }
+                if (!val.type.equals(elementType)) {
+                    throw new RuntimeException("LLVM backend: mixed dictionary value types are not supported natively");
                 }
                 if (!key.owned) retainManaged(key);
-                body.append("  call void @__ow_native_intmap_set(%ow.intmap* ")
-                        .append(dictionary.ref).append(", %ow.string ")
-                        .append(key.ref).append(", i32 ").append(val.ref).append(")\n");
+                if (elementType.equals("%ow.string") && !val.owned) retainManaged(val);
+                String kind = elementType.equals("i32") ? "intmap" : "strmap";
+                body.append("  call void @__ow_native_").append(kind).append("_set(")
+                        .append(dictionary.type).append(" ").append(dictionary.ref)
+                        .append(", %ow.string ").append(key.ref)
+                        .append(", ").append(elementType).append(" ")
+                        .append(val.ref).append(")\n");
             }
-            return dictionary;
+            return dictionary == null ? createIntegerMap() : dictionary;
         }
         if (e instanceof Ast.Var v) {
             String ptr = locals.get(v.name);
@@ -461,15 +488,19 @@ public class LlvmIrGen {
         if (e instanceof Ast.IndexExpr idx) {
             Value target = genExpr(idx.target);
             Value index = genExpr(idx.index);
-            if (target.type.equals("%ow.intmap*")) {
+            if (target.type.equals("%ow.intmap*") || target.type.equals("%ow.strmap*")) {
                 requireIntegerMapKey(index);
+                String elementType = target.type.equals("%ow.intmap*") ? "i32" : "%ow.string";
+                String kind = elementType.equals("i32") ? "intmap" : "strmap";
                 String found = newTemp();
-                body.append("  ").append(found)
-                        .append(" = call i32 @__ow_native_intmap_get(%ow.intmap* ")
+                body.append("  ").append(found).append(" = call ")
+                        .append(elementType).append(" @__ow_native_").append(kind)
+                        .append("_get(").append(target.type).append(" ")
                         .append(target.ref).append(", %ow.string ").append(index.ref).append(")\n");
                 if (index.owned) releaseManaged(index);
                 if (target.owned) releaseManaged(target);
-                return new Value(found, "i32");
+                // strmap_get retains its return before the map can be freed.
+                return new Value(found, elementType, elementType.equals("%ow.string"));
             }
             String ptr = checkedArrayElement(target, index);
             String result = newTemp();
@@ -654,6 +685,13 @@ public class LlvmIrGen {
         }
     }
 
+    private Value createStringMap() {
+        String result = newTemp();
+        body.append("  ").append(result)
+                .append(" = call %ow.strmap* @__ow_native_strmap_new()\n");
+        return new Value(result, "%ow.strmap*", true);
+    }
+
     private Value createIntegerMap() {
         String result = newTemp();
         body.append("  ").append(result)
@@ -663,9 +701,9 @@ public class LlvmIrGen {
 
     private Value mapArgument(Ast.CallExpr call, int index) {
         Value map = genExpr(call.args.get(index));
-        if (!map.type.equals("%ow.intmap*")) {
+        if (!map.type.equals("%ow.intmap*") && !map.type.equals("%ow.strmap*")) {
             throw new RuntimeException("LLVM backend: " + call.name
-                    + " expects an integer-valued dictionary");
+                    + " expects a native dictionary");
         }
         return map;
     }
@@ -691,6 +729,9 @@ public class LlvmIrGen {
                     + arity + " argument(s)");
         }
         Value map = mapArgument(call, 0);
+        if (map.type.equals("%ow.strmap*")) {
+            return genStringMapBuiltin(call, map);
+        }
         if (name.equals("map_size")) {
             String result = newTemp();
             body.append("  ").append(result)
@@ -772,6 +813,97 @@ public class LlvmIrGen {
             return new Value(answer, "i32");
         }
         throw new IllegalStateException("Unchecked map builtin: " + name);
+    }
+
+    /** String-valued dictionary builtin lowering. map_get's fallback is
+     * evaluated only when the key is absent. Returned strings own one
+     * reference even if the source dictionary is a temporary expression.
+     */
+    private Value genStringMapBuiltin(Ast.CallExpr call, Value map) {
+        String name = call.name;
+        if (name.equals("map_size")) {
+            String result = newTemp();
+            body.append("  ").append(result)
+                    .append(" = call i32 @__ow_native_strmap_size(%ow.strmap* ")
+                    .append(map.ref).append(")\n");
+            if (map.owned) releaseManaged(map);
+            return new Value(result, "i32");
+        }
+        Value key = mapKeyArgument(call, 1);
+        if (name.equals("map_set")) {
+            Value value = genExpr(call.args.get(2));
+            if (!value.type.equals("%ow.string")) {
+                throw new RuntimeException("LLVM backend: map_set expects a string value for string_map");
+            }
+            if (!key.owned) retainManaged(key);
+            if (!value.owned) retainManaged(value);
+            body.append("  call void @__ow_native_strmap_set(%ow.strmap* ")
+                    .append(map.ref).append(", %ow.string ").append(key.ref)
+                    .append(", %ow.string ").append(value.ref).append(")\n");
+            return map;
+        }
+        if (name.equals("map_delete")) {
+            body.append("  call void @__ow_native_strmap_delete(%ow.strmap* ")
+                    .append(map.ref).append(", %ow.string ").append(key.ref).append(")\n");
+            if (key.owned) releaseManaged(key);
+            return map;
+        }
+        if (name.equals("map_has")) {
+            String result = newTemp();
+            body.append("  ").append(result)
+                    .append(" = call i1 @__ow_native_strmap_has(%ow.strmap* ")
+                    .append(map.ref).append(", %ow.string ").append(key.ref).append(")\n");
+            if (key.owned) releaseManaged(key);
+            if (map.owned) releaseManaged(map);
+            return new Value(result, "i1");
+        }
+        if (name.equals("map_get")) {
+            String found = newTemp();
+            body.append("  ").append(found)
+                    .append(" = call %ow.strmap.entry* @__ow_native_strmap_find(%ow.strmap* ")
+                    .append(map.ref).append(", %ow.string ").append(key.ref).append(")\n");
+            String present = newTemp();
+            body.append("  ").append(present)
+                    .append(" = icmp ne %ow.strmap.entry* ")
+                    .append(found).append(", null\n");
+            int id = labelId++;
+            String yes = "strmap.get.present." + id;
+            String no = "strmap.get.absent." + id;
+            String done = "strmap.get.end." + id;
+            String slot = newTemp();
+            entryAllocs.append("  ").append(slot).append(" = alloca %ow.string\n");
+            body.append("  br i1 ").append(present).append(", label %")
+                    .append(yes).append(", label %").append(no).append("\n");
+            body.append(yes).append(":\n");
+            String pointer = newTemp();
+            body.append("  ").append(pointer)
+                    .append(" = getelementptr %ow.strmap.entry, %ow.strmap.entry* ")
+                    .append(found).append(", i32 0, i32 1\n");
+            String stored = newTemp();
+            body.append("  ").append(stored)
+                    .append(" = load %ow.string, %ow.string* ").append(pointer).append("\n");
+            retainManaged(new Value(stored, "%ow.string"));
+            body.append("  store %ow.string ").append(stored)
+                    .append(", %ow.string* ").append(slot).append("\n");
+            body.append("  br label %").append(done).append("\n");
+            body.append(no).append(":\n");
+            Value fallback = genExpr(call.args.get(2));
+            if (!fallback.type.equals("%ow.string")) {
+                throw new RuntimeException("LLVM backend: map_get fallback must be a string for string_map");
+            }
+            if (!fallback.owned) retainManaged(fallback);
+            body.append("  store %ow.string ").append(fallback.ref)
+                    .append(", %ow.string* ").append(slot).append("\n");
+            body.append("  br label %").append(done).append("\n");
+            body.append(done).append(":\n");
+            String answer = newTemp();
+            body.append("  ").append(answer)
+                    .append(" = load %ow.string, %ow.string* ").append(slot).append("\n");
+            if (key.owned) releaseManaged(key);
+            if (map.owned) releaseManaged(map);
+            return new Value(answer, "%ow.string", true);
+        }
+        throw new IllegalStateException("Unsupported string_map operation: " + name);
     }
 
     private Value allocatedArrayData(int count) {
@@ -1023,7 +1155,8 @@ public class LlvmIrGen {
 
     private static boolean isManaged(String type) {
         return type.equals("%ow.array") || type.equals("%ow.string")
-                || type.equals("%ow.strarray") || type.equals("%ow.intmap*");
+                || type.equals("%ow.strarray") || type.equals("%ow.intmap*")
+                || type.equals("%ow.strmap*");
     }
 
     private String stringData(Value string) {
@@ -1038,6 +1171,9 @@ public class LlvmIrGen {
         else if (value.type.equals("%ow.intmap*"))
             body.append("  call void @__ow_native_intmap_retain(%ow.intmap* ")
                     .append(value.ref).append(")\n");
+        else if (value.type.equals("%ow.strmap*"))
+            body.append("  call void @__ow_native_strmap_retain(%ow.strmap* ")
+                    .append(value.ref).append(")\n");
         else if (value.type.equals("%ow.strarray"))
             body.append("  call void @__ow_native_strarray_retain(%ow.strarray ")
                     .append(value.ref).append(")\n");
@@ -1051,6 +1187,9 @@ public class LlvmIrGen {
         if (value.type.equals("%ow.array")) releaseArray(value);
         else if (value.type.equals("%ow.intmap*"))
             body.append("  call void @__ow_native_intmap_release(%ow.intmap* ")
+                    .append(value.ref).append(")\n");
+        else if (value.type.equals("%ow.strmap*"))
+            body.append("  call void @__ow_native_strmap_release(%ow.strmap* ")
                     .append(value.ref).append(")\n");
         else if (value.type.equals("%ow.strarray"))
             body.append("  call void @__ow_native_strarray_release(%ow.strarray ")
@@ -1556,6 +1695,9 @@ public class LlvmIrGen {
         }
         if (declaredType.equals("int_map")) {
             return "%ow.intmap*";
+        }
+        if (declaredType.equals("string_map")) {
+            return "%ow.strmap*";
         }
         if (declaredType.equals("string")) {
             return "%ow.string";
