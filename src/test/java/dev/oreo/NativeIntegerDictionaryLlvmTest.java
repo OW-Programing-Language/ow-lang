@@ -18,8 +18,8 @@ public class NativeIntegerDictionaryLlvmTest {
                   print: ratings["Magma Cube"]
                   print: map_size(ratings)
                 """);
-        assertTrue(ll.contains("%ow.intmap.entry = type { %ow.string, i32, %ow.intmap.entry* }"));
-        assertTrue(ll.contains("%ow.intmap = type { %ow.intmap.entry**, i32, i32, i32 }"));
+        assertTrue(ll.contains("%ow.intmap.entry = type { %ow.string, i32, %ow.intmap.entry*, %ow.intmap.entry*, %ow.intmap.entry* }"));
+        assertTrue(ll.contains("%ow.intmap = type { %ow.intmap.entry**, i32, i32, i32, %ow.intmap.entry*, %ow.intmap.entry* }"));
         assertTrue(ll.contains("call %ow.intmap* @__ow_native_intmap_new()"));
         assertTrue(ll.contains("call void @__ow_native_intmap_set(%ow.intmap*"));
         assertTrue(ll.contains("call i32 @__ow_native_intmap_get(%ow.intmap*"));
@@ -148,13 +148,15 @@ public class NativeIntegerDictionaryLlvmTest {
         assertTrue(error.getMessage().contains("expects 2 argument"));
     }
 
-    @Test public void unsupportedMapKeysBuiltinFailsExplicitly() {
-        RuntimeException error = assertThrows(RuntimeException.class, () -> ir("""
+    @Test public void mapKeysNowReturnsManagedInsertionOrderedArray() {
+        String llvm = ir("""
                 main:
                   set m: { a: 1 }
                   set ks: map_keys(m)
-                """));
-        assertTrue(error.getMessage().contains("not yet supported"));
+                  print: ks[0]
+                """);
+        assertTrue(llvm.contains("call void @__ow_native_intmap_fill_keys("));
+        assertTrue(llvm.contains("call %ow.strarray @__ow_native_strarray_new("));
     }
 
     @Test public void rejectsWrongTypeWhenPassingNativeIntMap() {
