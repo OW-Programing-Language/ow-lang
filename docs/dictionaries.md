@@ -137,7 +137,9 @@ and `map_delete`. Mixed maps use tagged values with managed UTF-8 strings.
 This implementation uses a shared reference-counted, resizing UTF-8
 [hash-table backend](native-hash-dictionaries.md) with average O(1) lookup,
 insertion and deletion. `map_keys`, `map_values`,
-nested object values and JSON remain interpreter-only. See
+arbitrary object values and JSON remain interpreter-only. Native
+nested dictionary values are supported with cycle prevention; see
+[native nested dictionaries](native-nested-maps.md). Also see
 [native mixed dictionaries](native-mixed-dictionaries.md),
 [native integer-valued dictionaries](native-int-dictionaries.md) and
 [native string-valued dictionaries](native-string-dictionaries.md).
