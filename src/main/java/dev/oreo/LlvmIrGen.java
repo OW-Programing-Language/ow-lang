@@ -815,6 +815,97 @@ public class LlvmIrGen {
         throw new IllegalStateException("Unchecked map builtin: " + name);
     }
 
+    /** String-valued dictionary builtin lowering. map_get's fallback is
+     * evaluated only when the key is absent. Returned strings own one
+     * reference even if the source dictionary is a temporary expression.
+     */
+    private Value genStringMapBuiltin(Ast.CallExpr call, Value map) {
+        String name = call.name;
+        if (name.equals("map_size")) {
+            String result = newTemp();
+            body.append("  ").append(result)
+                    .append(" = call i32 @__ow_native_strmap_size(%ow.strmap* ")
+                    .append(map.ref).append(")\n");
+            if (map.owned) releaseManaged(map);
+            return new Value(result, "i32");
+        }
+        Value key = mapKeyArgument(call, 1);
+        if (name.equals("map_set")) {
+            Value value = genExpr(call.args.get(2));
+            if (!value.type.equals("%ow.string")) {
+                throw new RuntimeException("LLVM backend: map_set expects a string value for string_map");
+            }
+            if (!key.owned) retainManaged(key);
+            if (!value.owned) retainManaged(value);
+            body.append("  call void @__ow_native_strmap_set(%ow.strmap* ")
+                    .append(map.ref).append(", %ow.string ").append(key.ref)
+                    .append(", %ow.string ").append(value.ref).append(")\n");
+            return map;
+        }
+        if (name.equals("map_delete")) {
+            body.append("  call void @__ow_native_strmap_delete(%ow.strmap* ")
+                    .append(map.ref).append(", %ow.string ").append(key.ref).append(")\n");
+            if (key.owned) releaseManaged(key);
+            return map;
+        }
+        if (name.equals("map_has")) {
+            String result = newTemp();
+            body.append("  ").append(result)
+                    .append(" = call i1 @__ow_native_strmap_has(%ow.strmap* ")
+                    .append(map.ref).append(", %ow.string ").append(key.ref).append(")\n");
+            if (key.owned) releaseManaged(key);
+            if (map.owned) releaseManaged(map);
+            return new Value(result, "i1");
+        }
+        if (name.equals("map_get")) {
+            String found = newTemp();
+            body.append("  ").append(found)
+                    .append(" = call %ow.strmap.entry* @__ow_native_strmap_find(%ow.strmap* ")
+                    .append(map.ref).append(", %ow.string ").append(key.ref).append(")\n");
+            String present = newTemp();
+            body.append("  ").append(present)
+                    .append(" = icmp ne %ow.strmap.entry* ")
+                    .append(found).append(", null\n");
+            int id = labelId++;
+            String yes = "strmap.get.present." + id;
+            String no = "strmap.get.absent." + id;
+            String done = "strmap.get.end." + id;
+            String slot = newTemp();
+            entryAllocs.append("  ").append(slot).append(" = alloca %ow.string\n");
+            body.append("  br i1 ").append(present).append(", label %")
+                    .append(yes).append(", label %").append(no).append("\n");
+            body.append(yes).append(":\n");
+            String pointer = newTemp();
+            body.append("  ").append(pointer)
+                    .append(" = getelementptr %ow.strmap.entry, %ow.strmap.entry* ")
+                    .append(found).append(", i32 0, i32 1\n");
+            String stored = newTemp();
+            body.append("  ").append(stored)
+                    .append(" = load %ow.string, %ow.string* ").append(pointer).append("\n");
+            retainManaged(new Value(stored, "%ow.string"));
+            body.append("  store %ow.string ").append(stored)
+                    .append(", %ow.string* ").append(slot).append("\n");
+            body.append("  br label %").append(done).append("\n");
+            body.append(no).append(":\n");
+            Value fallback = genExpr(call.args.get(2));
+            if (!fallback.type.equals("%ow.string")) {
+                throw new RuntimeException("LLVM backend: map_get fallback must be a string for string_map");
+            }
+            if (!fallback.owned) retainManaged(fallback);
+            body.append("  store %ow.string ").append(fallback.ref)
+                    .append(", %ow.string* ").append(slot).append("\n");
+            body.append("  br label %").append(done).append("\n");
+            body.append(done).append(":\n");
+            String answer = newTemp();
+            body.append("  ").append(answer)
+                    .append(" = load %ow.string, %ow.string* ").append(slot).append("\n");
+            if (key.owned) releaseManaged(key);
+            if (map.owned) releaseManaged(map);
+            return new Value(answer, "%ow.string", true);
+        }
+        throw new IllegalStateException("Unsupported string_map operation: " + name);
+    }
+
     private Value allocatedArrayData(int count) {
         return allocatedArrayDataRaw(Integer.toString(Math.max(1, count)));
     }
