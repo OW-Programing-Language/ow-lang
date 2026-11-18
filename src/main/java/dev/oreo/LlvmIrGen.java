@@ -41,7 +41,9 @@ public class LlvmIrGen {
             if (fn.name.startsWith("__ow_native_array_") || fn.name.startsWith("__ow_native_string_")
                     || fn.name.startsWith("__ow_native_strarray_")
                     || fn.name.startsWith("__ow_native_intmap_")
-                    || fn.name.startsWith("__ow_native_strmap_")) {
+                    || fn.name.startsWith("__ow_native_strmap_")
+                    || fn.name.startsWith("__ow_native_mixedmap_")
+                    || fn.name.startsWith("__ow_native_mixed_")) {
                 throw new RuntimeException("LLVM backend: reserved native runtime function name: " + fn.name);
             }
             if (!functionNames.add(fn.name)) {
@@ -74,6 +76,9 @@ public class LlvmIrGen {
         out.append("%ow.intmap = type { %ow.intmap.entry*, i32, i32 }\n");
         out.append("%ow.strmap.entry = type { %ow.string, %ow.string, %ow.strmap.entry* }\n");
         out.append("%ow.strmap = type { %ow.strmap.entry*, i32, i32 }\n");
+        out.append("%ow.mixed = type { i32, i32, %ow.string }\n");
+        out.append("%ow.mixedmap.entry = type { %ow.string, %ow.mixed, %ow.mixedmap.entry* }\n");
+        out.append("%ow.mixedmap = type { %ow.mixedmap.entry*, i32, i32 }\n");
         out.append("declare i8* @calloc(i64, i64)\n");
         out.append("declare void @free(i8*)\n");
         out.append("declare void @abort() noreturn\n");
@@ -89,6 +94,7 @@ public class LlvmIrGen {
         out.append(nativeStringArrayHelpers());
         out.append(nativeIntegerMapHelpers());
         out.append(NativeStringMapIr.generate());
+        out.append(NativeMixedMapIr.generate());
         out.append(fnsCode);
         return out.toString();
     }
@@ -153,10 +159,12 @@ public class LlvmIrGen {
         if (currentReturnType.equals("%ow.array") || currentReturnType.equals("%ow.strarray")) {
             // The explicit source return has already emitted the real result.
             body.append("  ret ").append(currentReturnType).append(" zeroinitializer\n");
-        } else if (currentReturnType.equals("%ow.string")) {
-            body.append("  ret %ow.string zeroinitializer\n");
+        } else if (currentReturnType.equals("%ow.string")
+                || currentReturnType.equals("%ow.mixed")) {
+            body.append("  ret ").append(currentReturnType).append(" zeroinitializer\n");
         } else if (currentReturnType.equals("%ow.intmap*")
-                || currentReturnType.equals("%ow.strmap*")) {
+                || currentReturnType.equals("%ow.strmap*")
+                || currentReturnType.equals("%ow.mixedmap*")) {
             body.append("  ret ").append(currentReturnType).append(" null\n");
         } else {
             body.append("  ret i32 0\n");
@@ -227,6 +235,15 @@ public class LlvmIrGen {
             // OW evaluates the container and index before the assigned value.
             Value array = genExpr(new Ast.Var(set.name));
             Value index = genExpr(set.index);
+            if (array.type.equals("%ow.mixedmap*")) {
+                requireIntegerMapKey(index);
+                Value value = boxMixed(genExpr(set.value));
+                if (!index.owned) retainManaged(index);
+                body.append("  call void @__ow_native_mixedmap_set(%ow.mixedmap* ")
+                        .append(array.ref).append(", %ow.string ").append(index.ref)
+                        .append(", %ow.mixed ").append(value.ref).append(")\n");
+                return;
+            }
             if (array.type.equals("%ow.intmap*") || array.type.equals("%ow.strmap*")) {
                 requireIntegerMapKey(index);
                 Value value = genExpr(set.value);
@@ -275,7 +292,11 @@ public class LlvmIrGen {
         if (st instanceof Ast.PrintStmt p) {
             Value v = genExpr(p.value);
             String fmtPtr = newTemp();
-            if (v.type.equals("i1")) {
+            if (v.type.equals("%ow.mixed")) {
+                body.append("  call void @__ow_native_mixed_print(%ow.mixed ")
+                        .append(v.ref).append(")\n");
+                if (v.owned) releaseManaged(v);
+            } else if (v.type.equals("i1")) {
                 String truePtr = newTemp();
                 body.append("  ").append(truePtr)
                         .append(" = getelementptr [5 x i8], [5 x i8]* @.bool_true, i32 0, i32 0\n");
@@ -447,34 +468,41 @@ public class LlvmIrGen {
             return buildArrayValue(Integer.toString(count), storage.ref);
         }
         if (e instanceof Ast.MapLit map) {
-            // Literal values determine the homogeneous native map ABI.
-            // The first value is generated once, preserving any side effects.
-            // An empty {} retains its previous integer-map type.
-            Value dictionary = null;
-            String elementType = null;
+            // Evaluate each value exactly once, retaining borrowed strings
+            // *at evaluation time* so later side effects cannot invalidate
+            // values before the map is allocated.
+            List<Value> values = new ArrayList<>();
+            boolean sawInt = false;
+            boolean sawString = false;
+            for (Ast.Expr expression : map.values) {
+                Value value = genExpr(expression);
+                if (!value.type.equals("i32") && !value.type.equals("%ow.string")) {
+                    throw new RuntimeException("LLVM backend: native dictionary values must be integers or strings");
+                }
+                sawInt |= value.type.equals("i32");
+                sawString |= value.type.equals("%ow.string");
+                if (value.type.equals("%ow.string") && !value.owned) retainManaged(value);
+                values.add(new Value(value.ref, value.type, true));
+            }
+            String kind = sawInt && sawString ? "mixedmap"
+                    : sawString ? "strmap" : "intmap";
+            Value dictionary = switch (kind) {
+                case "mixedmap" -> createMixedMap();
+                case "strmap" -> createStringMap();
+                default -> createIntegerMap();
+            };
             for (int i = 0; i < map.keys.size(); i++) {
                 Value key = genExpr(new Ast.StringLit(map.keys.get(i)));
-                Value val = genExpr(map.values.get(i));
-                if (dictionary == null) {
-                    if (!val.type.equals("i32") && !val.type.equals("%ow.string")) {
-                        throw new RuntimeException("LLVM backend: native dictionaries require integer or string values");
-                    }
-                    elementType = val.type;
-                    dictionary = elementType.equals("i32") ? createIntegerMap() : createStringMap();
-                }
-                if (!val.type.equals(elementType)) {
-                    throw new RuntimeException("LLVM backend: mixed dictionary value types are not supported natively");
-                }
+                Value value = values.get(i);
                 if (!key.owned) retainManaged(key);
-                if (elementType.equals("%ow.string") && !val.owned) retainManaged(val);
-                String kind = elementType.equals("i32") ? "intmap" : "strmap";
-                body.append("  call void @__ow_native_").append(kind).append("_set(")
-                        .append(dictionary.type).append(" ").append(dictionary.ref)
-                        .append(", %ow.string ").append(key.ref)
-                        .append(", ").append(elementType).append(" ")
-                        .append(val.ref).append(")\n");
+                if (kind.equals("mixedmap")) value = boxMixed(value);
+                body.append("  call void @__ow_native_").append(kind)
+                        .append("_set(").append(dictionary.type).append(" ")
+                        .append(dictionary.ref).append(", %ow.string ").append(key.ref)
+                        .append(", ").append(value.type).append(" ")
+                        .append(value.ref).append(")\n");
             }
-            return dictionary == null ? createIntegerMap() : dictionary;
+            return dictionary;
         }
         if (e instanceof Ast.Var v) {
             String ptr = locals.get(v.name);
@@ -488,6 +516,17 @@ public class LlvmIrGen {
         if (e instanceof Ast.IndexExpr idx) {
             Value target = genExpr(idx.target);
             Value index = genExpr(idx.index);
+            if (target.type.equals("%ow.mixedmap*")) {
+                requireIntegerMapKey(index);
+                String result = newTemp();
+                body.append("  ").append(result)
+                        .append(" = call %ow.mixed @__ow_native_mixedmap_get(%ow.mixedmap* ")
+                        .append(target.ref).append(", %ow.string ")
+                        .append(index.ref).append(")\n");
+                if (index.owned) releaseManaged(index);
+                if (target.owned) releaseManaged(target);
+                return new Value(result, "%ow.mixed", true);
+            }
             if (target.type.equals("%ow.intmap*") || target.type.equals("%ow.strmap*")) {
                 requireIntegerMapKey(index);
                 String elementType = target.type.equals("%ow.intmap*") ? "i32" : "%ow.string";
@@ -685,6 +724,33 @@ public class LlvmIrGen {
         }
     }
 
+    private Value createMixedMap() {
+        String result = newTemp();
+        body.append("  ").append(result)
+                .append(" = call %ow.mixedmap* @__ow_native_mixedmap_new()\n");
+        return new Value(result, "%ow.mixedmap*", true);
+    }
+
+    /** Box a scalar or already tagged result, consuming owned values and
+     * retaining borrowed strings so the returned tagged value owns a ref.
+     */
+    private Value boxMixed(Value value) {
+        if (value.type.equals("%ow.mixed")) {
+            if (!value.owned) retainManaged(value);
+            return new Value(value.ref, value.type, true);
+        }
+        if (!value.type.equals("i32") && !value.type.equals("%ow.string")) {
+            throw new RuntimeException("LLVM backend: mixed map supports integer/string values only");
+        }
+        if (value.type.equals("%ow.string") && !value.owned) retainManaged(value);
+        String t = newTemp();
+        String name = value.type.equals("i32") ? "wrap_i32" : "wrap_string";
+        body.append("  ").append(t).append(" = call %ow.mixed @__ow_native_mixed_")
+                .append(name).append("(").append(value.type).append(" ")
+                .append(value.ref).append(")\n");
+        return new Value(t, "%ow.mixed", true);
+    }
+
     private Value createStringMap() {
         String result = newTemp();
         body.append("  ").append(result)
@@ -701,7 +767,8 @@ public class LlvmIrGen {
 
     private Value mapArgument(Ast.CallExpr call, int index) {
         Value map = genExpr(call.args.get(index));
-        if (!map.type.equals("%ow.intmap*") && !map.type.equals("%ow.strmap*")) {
+        if (!map.type.equals("%ow.intmap*") && !map.type.equals("%ow.strmap*")
+                && !map.type.equals("%ow.mixedmap*")) {
             throw new RuntimeException("LLVM backend: " + call.name
                     + " expects a native dictionary");
         }
@@ -731,6 +798,9 @@ public class LlvmIrGen {
         Value map = mapArgument(call, 0);
         if (map.type.equals("%ow.strmap*")) {
             return genStringMapBuiltin(call, map);
+        }
+        if (map.type.equals("%ow.mixedmap*")) {
+            return genMixedMapBuiltin(call, map);
         }
         if (name.equals("map_size")) {
             String result = newTemp();
@@ -1156,7 +1226,8 @@ public class LlvmIrGen {
     private static boolean isManaged(String type) {
         return type.equals("%ow.array") || type.equals("%ow.string")
                 || type.equals("%ow.strarray") || type.equals("%ow.intmap*")
-                || type.equals("%ow.strmap*");
+                || type.equals("%ow.strmap*") || type.equals("%ow.mixedmap*")
+                || type.equals("%ow.mixed");
     }
 
     private String stringData(Value string) {
@@ -1174,6 +1245,12 @@ public class LlvmIrGen {
         else if (value.type.equals("%ow.strmap*"))
             body.append("  call void @__ow_native_strmap_retain(%ow.strmap* ")
                     .append(value.ref).append(")\n");
+        else if (value.type.equals("%ow.mixedmap*"))
+            body.append("  call void @__ow_native_mixedmap_retain(%ow.mixedmap* ")
+                    .append(value.ref).append(")\n");
+        else if (value.type.equals("%ow.mixed"))
+            body.append("  call void @__ow_native_mixed_retain(%ow.mixed ")
+                    .append(value.ref).append(")\n");
         else if (value.type.equals("%ow.strarray"))
             body.append("  call void @__ow_native_strarray_retain(%ow.strarray ")
                     .append(value.ref).append(")\n");
@@ -1190,6 +1267,12 @@ public class LlvmIrGen {
                     .append(value.ref).append(")\n");
         else if (value.type.equals("%ow.strmap*"))
             body.append("  call void @__ow_native_strmap_release(%ow.strmap* ")
+                    .append(value.ref).append(")\n");
+        else if (value.type.equals("%ow.mixedmap*"))
+            body.append("  call void @__ow_native_mixedmap_release(%ow.mixedmap* ")
+                    .append(value.ref).append(")\n");
+        else if (value.type.equals("%ow.mixed"))
+            body.append("  call void @__ow_native_mixed_release(%ow.mixed ")
                     .append(value.ref).append(")\n");
         else if (value.type.equals("%ow.strarray"))
             body.append("  call void @__ow_native_strarray_release(%ow.strarray ")
@@ -1698,6 +1781,12 @@ public class LlvmIrGen {
         }
         if (declaredType.equals("string_map")) {
             return "%ow.strmap*";
+        }
+        if (declaredType.equals("mixed_map")) {
+            return "%ow.mixedmap*";
+        }
+        if (declaredType.equals("mixed")) {
+            return "%ow.mixed";
         }
         if (declaredType.equals("string")) {
             return "%ow.string";
