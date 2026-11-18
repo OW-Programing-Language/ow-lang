@@ -1,0 +1,4 @@
+# Native dictionary indexing rejects a missing key.
+main:
+  set m: { a: 1 }
+  print: m["missing"]
