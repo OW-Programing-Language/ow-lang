@@ -275,6 +275,24 @@ final class NativeHashMapIr {
                   %nextPtr = getelementptr %ow.__K__.entry, %ow.__K__.entry* %node, i32 0, i32 2
                   store %ow.__K__.entry* %priorNode, %ow.__K__.entry** %nextPtr
                   store %ow.__K__.entry* %node, %ow.__K__.entry** %bucketSlot
+                  ; Append to the insertion-order list. Updating an old
+                  ; key leaves its original order untouched.
+                  %tailPtr = getelementptr %ow.__K__, %ow.__K__* %map, i32 0, i32 5
+                  %previousTail = load %ow.__K__.entry*, %ow.__K__.entry** %tailPtr
+                  %orderPrevPtr = getelementptr %ow.__K__.entry, %ow.__K__.entry* %node, i32 0, i32 3
+                  store %ow.__K__.entry* %previousTail, %ow.__K__.entry** %orderPrevPtr
+                  %hasPreviousTail = icmp ne %ow.__K__.entry* %previousTail, null
+                  br i1 %hasPreviousTail, label %appendToTail, label %firstOrderNode
+                appendToTail:
+                  %tailNextPtr = getelementptr %ow.__K__.entry, %ow.__K__.entry* %previousTail, i32 0, i32 4
+                  store %ow.__K__.entry* %node, %ow.__K__.entry** %tailNextPtr
+                  br label %finishOrder
+                firstOrderNode:
+                  %orderHeadPtr = getelementptr %ow.__K__, %ow.__K__* %map, i32 0, i32 4
+                  store %ow.__K__.entry* %node, %ow.__K__.entry** %orderHeadPtr
+                  br label %finishOrder
+                finishOrder:
+                  store %ow.__K__.entry* %node, %ow.__K__.entry** %tailPtr
                   %countPtr = getelementptr %ow.__K__, %ow.__K__* %map, i32 0, i32 2
                   %count = load i32, i32* %countPtr
                   %countNext = add i32 %count, 1
@@ -347,6 +365,33 @@ final class NativeHashMapIr {
                   %nextPtr = getelementptr %ow.__K__.entry, %ow.__K__.entry* %node, i32 0, i32 2
                   %next = load %ow.__K__.entry*, %ow.__K__.entry** %nextPtr
                   store %ow.__K__.entry* %next, %ow.__K__.entry** %pointer
+                  ; Unlink from insertion order independently of its bucket.
+                  %orderPrevPtr = getelementptr %ow.__K__.entry, %ow.__K__.entry* %node, i32 0, i32 3
+                  %orderNextPtr = getelementptr %ow.__K__.entry, %ow.__K__.entry* %node, i32 0, i32 4
+                  %orderPrev = load %ow.__K__.entry*, %ow.__K__.entry** %orderPrevPtr
+                  %orderNext = load %ow.__K__.entry*, %ow.__K__.entry** %orderNextPtr
+                  %noPrev = icmp eq %ow.__K__.entry* %orderPrev, null
+                  br i1 %noPrev, label %removeOrderHead, label %removeOrderMiddle
+                removeOrderHead:
+                  %orderHeadPtr = getelementptr %ow.__K__, %ow.__K__* %map, i32 0, i32 4
+                  store %ow.__K__.entry* %orderNext, %ow.__K__.entry** %orderHeadPtr
+                  br label %fixOrderNext
+                removeOrderMiddle:
+                  %previousNextPtr = getelementptr %ow.__K__.entry, %ow.__K__.entry* %orderPrev, i32 0, i32 4
+                  store %ow.__K__.entry* %orderNext, %ow.__K__.entry** %previousNextPtr
+                  br label %fixOrderNext
+                fixOrderNext:
+                  %noNext = icmp eq %ow.__K__.entry* %orderNext, null
+                  br i1 %noNext, label %removeOrderTail, label %removeOrderInterior
+                removeOrderTail:
+                  %orderTailPtr = getelementptr %ow.__K__, %ow.__K__* %map, i32 0, i32 5
+                  store %ow.__K__.entry* %orderPrev, %ow.__K__.entry** %orderTailPtr
+                  br label %releaseRemovedNode
+                removeOrderInterior:
+                  %followingPrevPtr = getelementptr %ow.__K__.entry, %ow.__K__.entry* %orderNext, i32 0, i32 3
+                  store %ow.__K__.entry* %orderPrev, %ow.__K__.entry** %followingPrevPtr
+                  br label %releaseRemovedNode
+                releaseRemovedNode:
                   call void @__ow_native_string_release(%ow.string %stored)
                   %valPtr = getelementptr %ow.__K__.entry, %ow.__K__.entry* %node, i32 0, i32 1
                   %val = load __V__, __V__* %valPtr

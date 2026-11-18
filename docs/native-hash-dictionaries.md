@@ -52,8 +52,9 @@ future work).
 
 The native maps currently support only UTF-8 string keys and integer/string
 values. They are single-threaded (ARC counters are non-atomic), have no
-general GC or null/object/nested-map values, and do not yet support
-`map_keys`, `map_values` or JSON lowering. FNV-1a is not a
+general GC or null/object/nested-map values, and now support insertion-ordered native `map_keys` and `map_values`
+through [ordered iteration](native-map-iteration.md), but not JSON lowering.
+FNV-1a is not a
 collision-resistant cryptographic hash: hostile user-controlled keys can
 still cause worst-case performance. Production hardened hashing, benchmarks,
 and automated adversarial collision tests are future work.

@@ -19,7 +19,7 @@ public class NativeMixedDictionaryLlvmTest {
                   print: m["version"]
                 """);
         assertTrue(ll.contains("%ow.mixed = type { i32, i32, %ow.string, i8* }"));
-        assertTrue(ll.contains("%ow.mixedmap.entry = type { %ow.string, %ow.mixed, %ow.mixedmap.entry* }"));
+        assertTrue(ll.contains("%ow.mixedmap.entry = type { %ow.string, %ow.mixed, %ow.mixedmap.entry*, %ow.mixedmap.entry*, %ow.mixedmap.entry* }"));
         assertTrue(ll.contains("call %ow.mixedmap* @__ow_native_mixedmap_new()"));
         assertTrue(ll.contains("call %ow.mixed @__ow_native_mixed_wrap_string("));
         assertTrue(ll.contains("call %ow.mixed @__ow_native_mixed_wrap_i32("));
