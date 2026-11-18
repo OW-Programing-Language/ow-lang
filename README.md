@@ -110,7 +110,10 @@ representation, retaining the separate `int_map` and `string_map` ABI
 for homogeneous values. Reference counting releases dynamically owned
 strings on replacement, deletion and map cleanup. Native lookup, insertion and deletion now use a shared **resizing UTF-8 hash
 table** (average O(1), worst-case O(n)), rather than a linear scan.
-Native nested dictionaries and iteration are not supported. See
+Native **nested dictionaries** can now be stored and read recursively,
+with managed child references and cycle prevention. Array/object map values
+and native enumeration are not supported. See
+[native nested dictionaries](docs/native-nested-maps.md),
 [hash-table implementation](docs/native-hash-dictionaries.md),
 [native mixed dictionaries](docs/native-mixed-dictionaries.md),
 [native integer maps](docs/native-int-dictionaries.md) and

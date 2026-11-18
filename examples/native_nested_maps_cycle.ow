@@ -1,0 +1,4 @@
+# Must abort instead of forming an ARC cycle.
+main:
+  set parent: { number: 1, label: "parent" }
+  set parent["self"]: parent

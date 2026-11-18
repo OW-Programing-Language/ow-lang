@@ -1,0 +1,51 @@
+name: OW native nested dictionaries
+
+on:
+  pull_request:
+  push:
+    paths:
+      - 'src/**'
+      - 'examples/native_nested_maps*'
+      - 'docs/native-nested-maps.md'
+      - '.github/workflows/native-nested-maps.yml'
+      - 'pom.xml'
+
+jobs:
+  nested-maps:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Run compiler JUnit tests
+        run: mvn -B clean package
+      - name: Compile native nested maps with address and leak sanitizers
+        run: |
+          java -jar target/OwIDE.jar llvm examples/native_nested_maps.ow target/native-nested-maps.ll
+          clang -g -O0 -fsanitize=address -fno-omit-frame-pointer target/native-nested-maps.ll -o target/native-nested-maps
+      - name: Compare interpreter with native output and check memory
+        run: |
+          java -jar target/OwIDE.jar run examples/native_nested_maps.ow > target/nested-maps-interpreted.txt
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 ./target/native-nested-maps > target/nested-maps-native.txt
+          diff -u target/nested-maps-interpreted.txt target/nested-maps-native.txt
+          diff -u examples/native_nested_maps.expected target/nested-maps-native.txt
+      - name: Negative native tests for cycles, missing keys and invalid nested indexing
+        shell: bash
+        run: |
+          ulimit -c 0
+          for fixture in native_nested_maps_cycle native_nested_maps_indirect_cycle native_nested_maps_missing native_nested_maps_scalar; do
+            java -jar target/OwIDE.jar llvm "examples/$fixture.ow" "target/$fixture.ll"
+            clang "target/$fixture.ll" -o "target/$fixture"
+            set +e
+            "./target/$fixture" > /dev/null 2>&1
+            status=$?
+            set -e
+            if [ "$status" -eq 0 ]; then
+              echo "ERROR: $fixture unexpectedly succeeded"
+              exit 1
+            fi
+            echo "$fixture rejected with status $status"
+          done

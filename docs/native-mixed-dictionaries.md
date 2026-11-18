@@ -17,8 +17,9 @@ main:
 
 ## Tagging and ownership
 
-`%ow.mixed = { i32 tag, i32 number, %ow.string text }` uses tag `0` for
-an integer and tag `1` for an immutable UTF-8 string with reference counting.
+`%ow.mixed = { i32 tag, i32 number, %ow.string text, i8* map }` uses
+tag `0` for an integer, tag `1` for an immutable UTF-8 string, and tags
+`2`, `3`, `4` for owned int/string/mixed child-map references.
 A `mixed_map` stores `%ow.mixed` values in string-keyed heap entries.
 Map nodes own both keys and values.
 
@@ -43,7 +44,9 @@ To store both kinds, initialize with a heterogeneous literal. Empty `{}`
 still creates an integer-valued map.
 
 The mixed value supports only integers and strings (not `null`, `bool` as
-a distinct type, floating-point values, arrays, nested maps, or objects).
+a distinct type, floating-point values, arrays or arbitrary objects). Nested dictionaries
+are now supported with tags 2-4 for int/string/mixed map pointers; see
+[native nested dictionaries](native-nested-maps.md).
 `print` can format a mixed value, but arithmetic or `len` on a mixed value
 requires explicit unboxing, which is not implemented here. Dictionary lookup, insertion and deletion now use the shared
 [resizing hash-table runtime](native-hash-dictionaries.md), with expected

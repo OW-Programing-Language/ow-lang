@@ -1,0 +1,42 @@
+# Nested native maps: YAML-like composition, aliases, functions and ARC.
+fn make():
+  returns: mixed_map
+  return: { database: { host: "localhost", port: 5432 }, app: { name: "OW" }, version: 6 }
+
+fn getPort(root: mixed_map):
+  returns: mixed
+  return: root["database"]["port"]
+
+main:
+  set root: make()
+  print: getPort(root)
+  print: root["database"]["host"]
+  print: root["app"]["name"]
+  print: root["version"]
+
+  set service: { title: "before" }
+  set settings: { service: service, count: 2 }
+  set service["title"]: "after"
+  print: settings["service"]["title"]
+  set settings["service"]: { title: "new" + "!" }
+  print: settings["service"]["title"]
+  print: service["title"]
+
+  set settings: map_set(settings, "database", { host: "db", port: 3306 })
+  print: settings["database"]["port"]
+  set settings: map_delete(settings, "service")
+  print: map_size(settings)
+
+  print: { outer: { inner: { leaf: "deep" } } }["outer"]["inner"]["leaf"]
+  print: map_get(settings, "missing", { port: 44 })["port"]
+
+  set alias: settings
+  set settings: make()
+  print: alias["database"]["host"]
+
+  set i: 0
+  while: i < 40
+    set current: { n: i, text: "x" + "y", nested: { value: "o" + "k" } }
+    set i: i + 1
+  print: current["nested"]["value"]
+  print: current["n"]

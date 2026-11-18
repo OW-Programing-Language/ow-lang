@@ -367,11 +367,27 @@ final class NativeHashMapIr {
         String relValue = releaseFn == null ? "" : "call void " + releaseFn + "(" + valueType + " %value)";
         String relVal = releaseFn == null ? "" : "call void " + releaseFn + "(" + valueType + " %val)";
         String retainResult = retainFn == null ? "" : "call void " + retainFn + "(" + valueType + " %value)";
-        return source.replace("__K__", name)
+        String ir = source.replace("__K__", name)
                 .replace("__V__", valueType)
                 .replace("__RELEASE_PRIOR__", relPrior)
                 .replace("__RELEASE_VALUE__", relValue)
                 .replace("__RELEASE_VAL__", relVal)
                 .replace("__RETAIN_RESULT__", retainResult);
+        if (name.equals("mixedmap")) {
+            // Mixed maps can own other mixed maps. Refuse both direct and
+            // transitive self-cycles before writing the new reference.
+            // All accepted container graphs therefore remain acyclic and
+            // can be reclaimed recursively by reference counting.
+            String setEntry = "define void @__ow_native_mixedmap_set(%ow.mixedmap* %map, "
+                    + "%ow.string %key, %ow.mixed %value) {\n"
+                    + "entry:\n";
+            String check = "  call void @__ow_native_nested_guard_cycle(%ow.mixedmap* "
+                    + "%map, %ow.mixed %value)\n";
+            if (!ir.contains(setEntry)) {
+                throw new IllegalStateException("Native mixed-map setter ABI changed");
+            }
+            ir = ir.replace(setEntry, setEntry + check);
+        }
+        return ir;
     }
 }

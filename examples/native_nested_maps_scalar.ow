@@ -1,0 +1,4 @@
+# Must abort when indexing a scalar tagged value as a dictionary.
+main:
+  set data: { number: 3, text: "OW" }
+  print: data["number"]["invalid"]
