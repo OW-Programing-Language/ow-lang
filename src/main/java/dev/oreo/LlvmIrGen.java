@@ -39,7 +39,8 @@ public class LlvmIrGen {
         functionSignatures.clear();
         for (Ast.FnDecl fn : program.functions) {
             if (fn.name.startsWith("__ow_native_array_") || fn.name.startsWith("__ow_native_string_")
-                    || fn.name.startsWith("__ow_native_strarray_")) {
+                    || fn.name.startsWith("__ow_native_strarray_")
+                    || fn.name.startsWith("__ow_native_intmap_")) {
                 throw new RuntimeException("LLVM backend: reserved native runtime function name: " + fn.name);
             }
             if (!functionNames.add(fn.name)) {
@@ -67,17 +68,23 @@ public class LlvmIrGen {
         out.append("%ow.string = type { i8*, i32* }\n");
         // String arrays carry refcounted %ow.string elements and own them.
         out.append("%ow.strarray = type { i32, %ow.string*, i32* }\n");
+        // First native dictionary subset: string keys, i32 values.
+        out.append("%ow.intmap.entry = type { %ow.string, i32, %ow.intmap.entry* }\n");
+        out.append("%ow.intmap = type { %ow.intmap.entry*, i32, i32 }\n");
         out.append("declare i8* @calloc(i64, i64)\n");
         out.append("declare void @free(i8*)\n");
         out.append("declare void @abort() noreturn\n");
         out.append("@.fmt_int = private constant [4 x i8] c\"%d\\0A\\00\"\n");
         out.append("@.fmt_str = private constant [4 x i8] c\"%s\\0A\\00\"\n");
+        out.append("@.bool_true = private constant [5 x i8] c\"true\\00\"\n");
+        out.append("@.bool_false = private constant [6 x i8] c\"false\\00\"\n");
         out.append(globals);
         out.append('\n');
         out.append(nativeArrayHelpers());
         out.append(nativeStringHelpers());
         out.append(nativeOwnedStringHelpers());
         out.append(nativeStringArrayHelpers());
+        out.append(nativeIntegerMapHelpers());
         out.append(fnsCode);
         return out.toString();
     }
@@ -144,6 +151,8 @@ public class LlvmIrGen {
             body.append("  ret ").append(currentReturnType).append(" zeroinitializer\n");
         } else if (currentReturnType.equals("%ow.string")) {
             body.append("  ret %ow.string zeroinitializer\n");
+        } else if (currentReturnType.equals("%ow.intmap*")) {
+            body.append("  ret %ow.intmap* null\n");
         } else {
             body.append("  ret i32 0\n");
         }
@@ -210,9 +219,22 @@ public class LlvmIrGen {
         }
 
         if (st instanceof Ast.SetIndexStmt set) {
-            // OW evaluates the array and index before the assigned value.
+            // OW evaluates the container and index before the assigned value.
             Value array = genExpr(new Ast.Var(set.name));
             Value index = genExpr(set.index);
+            if (array.type.equals("%ow.intmap*")) {
+                requireIntegerMapKey(index);
+                Value value = genExpr(set.value);
+                if (!value.type.equals("i32")) {
+                    throw new RuntimeException("LLVM backend: native dictionaries currently require integer values");
+                }
+                // map_set takes ownership of exactly one key reference.
+                if (!index.owned) retainManaged(index);
+                body.append("  call void @__ow_native_intmap_set(%ow.intmap* ")
+                        .append(array.ref).append(", %ow.string ")
+                        .append(index.ref).append(", i32 ").append(value.ref).append(")\n");
+                return;
+            }
             String elementPtr = checkedArrayElement(array, index);
             Value value = genExpr(set.value);
             if (array.type.equals("%ow.strarray")) {
@@ -241,7 +263,22 @@ public class LlvmIrGen {
         if (st instanceof Ast.PrintStmt p) {
             Value v = genExpr(p.value);
             String fmtPtr = newTemp();
-            if (v.type.equals("i32")) {
+            if (v.type.equals("i1")) {
+                String truePtr = newTemp();
+                body.append("  ").append(truePtr)
+                        .append(" = getelementptr [5 x i8], [5 x i8]* @.bool_true, i32 0, i32 0\n");
+                String falsePtr = newTemp();
+                body.append("  ").append(falsePtr)
+                        .append(" = getelementptr [6 x i8], [6 x i8]* @.bool_false, i32 0, i32 0\n");
+                String boolText = newTemp();
+                body.append("  ").append(boolText).append(" = select i1 ")
+                        .append(v.ref).append(", i8* ").append(truePtr)
+                        .append(", i8* ").append(falsePtr).append("\n");
+                body.append("  ").append(fmtPtr)
+                        .append(" = getelementptr [4 x i8], [4 x i8]* @.fmt_str, i32 0, i32 0\n");
+                body.append("  call i32 (i8*, ...) @printf(i8* ").append(fmtPtr)
+                        .append(", i8* ").append(boolText).append(")\n");
+            } else if (v.type.equals("i32")) {
                 body.append("  ").append(fmtPtr)
                         .append(" = getelementptr [4 x i8], [4 x i8]* @.fmt_int, i32 0, i32 0\n");
                 body.append("  call i32 (i8*, ...) @printf(i8* ").append(fmtPtr)
@@ -397,6 +434,21 @@ public class LlvmIrGen {
             }
             return buildArrayValue(Integer.toString(count), storage.ref);
         }
+        if (e instanceof Ast.MapLit map) {
+            Value dictionary = createIntegerMap();
+            for (int i = 0; i < map.keys.size(); i++) {
+                Value key = genExpr(new Ast.StringLit(map.keys.get(i)));
+                Value val = genExpr(map.values.get(i));
+                if (!val.type.equals("i32")) {
+                    throw new RuntimeException("LLVM backend: native dictionary literals currently require integer values");
+                }
+                if (!key.owned) retainManaged(key);
+                body.append("  call void @__ow_native_intmap_set(%ow.intmap* ")
+                        .append(dictionary.ref).append(", %ow.string ")
+                        .append(key.ref).append(", i32 ").append(val.ref).append(")\n");
+            }
+            return dictionary;
+        }
         if (e instanceof Ast.Var v) {
             String ptr = locals.get(v.name);
             if (ptr == null) throw new RuntimeException("Undefined variable: " + v.name);
@@ -409,6 +461,16 @@ public class LlvmIrGen {
         if (e instanceof Ast.IndexExpr idx) {
             Value target = genExpr(idx.target);
             Value index = genExpr(idx.index);
+            if (target.type.equals("%ow.intmap*")) {
+                requireIntegerMapKey(index);
+                String found = newTemp();
+                body.append("  ").append(found)
+                        .append(" = call i32 @__ow_native_intmap_get(%ow.intmap* ")
+                        .append(target.ref).append(", %ow.string ").append(index.ref).append(")\n");
+                if (index.owned) releaseManaged(index);
+                if (target.owned) releaseManaged(target);
+                return new Value(found, "i32");
+            }
             String ptr = checkedArrayElement(target, index);
             String result = newTemp();
             if (target.type.equals("%ow.strarray")) {
@@ -499,6 +561,9 @@ public class LlvmIrGen {
             return new Value(t, "i1");
         }
         if (e instanceof Ast.CallExpr call) {
+            if (call.name.startsWith("map_")) {
+                return genIntegerMapBuiltin(call);
+            }
             if (call.name.equals("len")) {
                 if (call.args.size() != 1)
                     throw new RuntimeException("LLVM backend: len expects one argument");
@@ -583,6 +648,132 @@ public class LlvmIrGen {
      * calloc(0,4) behavior. Allocation failure terminates rather than
      * performing a null dereference.
      */
+    private void requireIntegerMapKey(Value key) {
+        if (!key.type.equals("%ow.string")) {
+            throw new RuntimeException("LLVM backend: dictionary keys must be strings");
+        }
+    }
+
+    private Value createIntegerMap() {
+        String result = newTemp();
+        body.append("  ").append(result)
+                .append(" = call %ow.intmap* @__ow_native_intmap_new()\n");
+        return new Value(result, "%ow.intmap*", true);
+    }
+
+    private Value mapArgument(Ast.CallExpr call, int index) {
+        Value map = genExpr(call.args.get(index));
+        if (!map.type.equals("%ow.intmap*")) {
+            throw new RuntimeException("LLVM backend: " + call.name
+                    + " expects an integer-valued dictionary");
+        }
+        return map;
+    }
+
+    private Value mapKeyArgument(Ast.CallExpr call, int index) {
+        Value key = genExpr(call.args.get(index));
+        requireIntegerMapKey(key);
+        return key;
+    }
+
+    private Value genIntegerMapBuiltin(Ast.CallExpr call) {
+        String name = call.name;
+        int count = call.args.size();
+        int arity = switch (name) {
+            case "map_size" -> 1;
+            case "map_has", "map_delete" -> 2;
+            case "map_get", "map_set" -> 3;
+            default -> throw new RuntimeException("LLVM backend: builtin '" + name
+                    + "' is not yet supported for native dictionaries");
+        };
+        if (count != arity) {
+            throw new RuntimeException("LLVM backend: " + name + " expects "
+                    + arity + " argument(s)");
+        }
+        Value map = mapArgument(call, 0);
+        if (name.equals("map_size")) {
+            String result = newTemp();
+            body.append("  ").append(result)
+                    .append(" = call i32 @__ow_native_intmap_size(%ow.intmap* ")
+                    .append(map.ref).append(")\n");
+            if (map.owned) releaseManaged(map);
+            return new Value(result, "i32");
+        }
+        Value key = mapKeyArgument(call, 1);
+        if (name.equals("map_set")) {
+            Value value = genExpr(call.args.get(2));
+            if (!value.type.equals("i32")) {
+                throw new RuntimeException("LLVM backend: map_set requires an integer value");
+            }
+            // Set consumes one key reference and returns the original map.
+            if (!key.owned) retainManaged(key);
+            body.append("  call void @__ow_native_intmap_set(%ow.intmap* ")
+                    .append(map.ref).append(", %ow.string ").append(key.ref)
+                    .append(", i32 ").append(value.ref).append(")\n");
+            return map;
+        }
+        if (name.equals("map_delete")) {
+            body.append("  call void @__ow_native_intmap_delete(%ow.intmap* ")
+                    .append(map.ref).append(", %ow.string ").append(key.ref).append(")\n");
+            if (key.owned) releaseManaged(key);
+            return map;
+        }
+        if (name.equals("map_has")) {
+            String result = newTemp();
+            body.append("  ").append(result)
+                    .append(" = call i1 @__ow_native_intmap_has(%ow.intmap* ")
+                    .append(map.ref).append(", %ow.string ").append(key.ref).append(")\n");
+            if (key.owned) releaseManaged(key);
+            if (map.owned) releaseManaged(map);
+            return new Value(result, "i1");
+        }
+        if (name.equals("map_get")) {
+            // map_get fallback is lazy: do not evaluate a fallback expression
+            // when the requested key is already in the dictionary.
+            String found = newTemp();
+            body.append("  ").append(found)
+                    .append(" = call %ow.intmap.entry* @__ow_native_intmap_find(%ow.intmap* ")
+                    .append(map.ref).append(", %ow.string ").append(key.ref).append(")\n");
+            String present = newTemp();
+            body.append("  ").append(present).append(" = icmp ne %ow.intmap.entry* ")
+                    .append(found).append(", null\n");
+            int id = labelId++;
+            String exists = "intmap.get.present." + id;
+            String absent = "intmap.get.absent." + id;
+            String end = "intmap.get.end." + id;
+            String slot = newTemp();
+            entryAllocs.append("  ").append(slot).append(" = alloca i32\n");
+            body.append("  br i1 ").append(present).append(", label %")
+                    .append(exists).append(", label %").append(absent).append("\n");
+            body.append(exists).append(":\n");
+            String valuePtr = newTemp();
+            body.append("  ").append(valuePtr).append(" = getelementptr %ow.intmap.entry, %ow.intmap.entry* ")
+                    .append(found).append(", i32 0, i32 1\n");
+            String current = newTemp();
+            body.append("  ").append(current).append(" = load i32, i32* ")
+                    .append(valuePtr).append("\n");
+            body.append("  store i32 ").append(current).append(", i32* ")
+                    .append(slot).append("\n");
+            body.append("  br label %").append(end).append("\n");
+            body.append(absent).append(":\n");
+            Value fallback = genExpr(call.args.get(2));
+            if (!fallback.type.equals("i32")) {
+                throw new RuntimeException("LLVM backend: map_get fallback must be an integer");
+            }
+            body.append("  store i32 ").append(fallback.ref).append(", i32* ")
+                    .append(slot).append("\n");
+            body.append("  br label %").append(end).append("\n");
+            body.append(end).append(":\n");
+            String answer = newTemp();
+            body.append("  ").append(answer).append(" = load i32, i32* ")
+                    .append(slot).append("\n");
+            if (key.owned) releaseManaged(key);
+            if (map.owned) releaseManaged(map);
+            return new Value(answer, "i32");
+        }
+        throw new IllegalStateException("Unchecked map builtin: " + name);
+    }
+
     private Value allocatedArrayData(int count) {
         return allocatedArrayDataRaw(Integer.toString(Math.max(1, count)));
     }
@@ -832,7 +1023,7 @@ public class LlvmIrGen {
 
     private static boolean isManaged(String type) {
         return type.equals("%ow.array") || type.equals("%ow.string")
-                || type.equals("%ow.strarray");
+                || type.equals("%ow.strarray") || type.equals("%ow.intmap*");
     }
 
     private String stringData(Value string) {
@@ -844,6 +1035,9 @@ public class LlvmIrGen {
 
     private void retainManaged(Value value) {
         if (value.type.equals("%ow.array")) retainArray(value);
+        else if (value.type.equals("%ow.intmap*"))
+            body.append("  call void @__ow_native_intmap_retain(%ow.intmap* ")
+                    .append(value.ref).append(")\n");
         else if (value.type.equals("%ow.strarray"))
             body.append("  call void @__ow_native_strarray_retain(%ow.strarray ")
                     .append(value.ref).append(")\n");
@@ -855,6 +1049,9 @@ public class LlvmIrGen {
 
     private void releaseManaged(Value value) {
         if (value.type.equals("%ow.array")) releaseArray(value);
+        else if (value.type.equals("%ow.intmap*"))
+            body.append("  call void @__ow_native_intmap_release(%ow.intmap* ")
+                    .append(value.ref).append(")\n");
         else if (value.type.equals("%ow.strarray"))
             body.append("  call void @__ow_native_strarray_release(%ow.strarray ")
                     .append(value.ref).append(")\n");
@@ -1149,6 +1346,9 @@ public class LlvmIrGen {
         }
         if (declaredType.equals("string_array")) {
             return "%ow.strarray";
+        }
+        if (declaredType.equals("int_map")) {
+            return "%ow.intmap*";
         }
         if (declaredType.equals("string")) {
             return "%ow.string";
