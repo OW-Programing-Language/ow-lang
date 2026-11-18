@@ -1,0 +1,4 @@
+# Must abort on missing nested dictionary key.
+main:
+  set parent: { inner: { key: "value" } }
+  print: parent["inner"]["does_not_exist"]
