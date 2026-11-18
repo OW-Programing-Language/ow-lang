@@ -45,9 +45,10 @@ still creates an integer-valued map.
 The mixed value supports only integers and strings (not `null`, `bool` as
 a distinct type, floating-point values, arrays, nested maps, or objects).
 `print` can format a mixed value, but arithmetic or `len` on a mixed value
-requires explicit unboxing, which is not implemented here. Dictionary lookup
-still uses a linked list (O(n)); a hash table is the next independent milestone.
-The interpreter accepts more types and operations than LLVM.
+requires explicit unboxing, which is not implemented here. Dictionary lookup, insertion and deletion now use the shared
+[resizing hash-table runtime](native-hash-dictionaries.md), with expected
+amortized O(1) operations and worst-case O(n) collisions. The interpreter
+still accepts more types and operations than LLVM.
 
 The native reference counts are single-threaded, missing-key indexing aborts
 rather than producing a catchable OW exception, and cyclic garbage collection

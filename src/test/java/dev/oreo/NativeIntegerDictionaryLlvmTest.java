@@ -19,7 +19,7 @@ public class NativeIntegerDictionaryLlvmTest {
                   print: map_size(ratings)
                 """);
         assertTrue(ll.contains("%ow.intmap.entry = type { %ow.string, i32, %ow.intmap.entry* }"));
-        assertTrue(ll.contains("%ow.intmap = type { %ow.intmap.entry*, i32, i32 }"));
+        assertTrue(ll.contains("%ow.intmap = type { %ow.intmap.entry**, i32, i32, i32 }"));
         assertTrue(ll.contains("call %ow.intmap* @__ow_native_intmap_new()"));
         assertTrue(ll.contains("call void @__ow_native_intmap_set(%ow.intmap*"));
         assertTrue(ll.contains("call i32 @__ow_native_intmap_get(%ow.intmap*"));

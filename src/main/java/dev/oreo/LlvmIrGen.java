@@ -73,12 +73,12 @@ public class LlvmIrGen {
         out.append("%ow.strarray = type { i32, %ow.string*, i32* }\n");
         // First native dictionary subset: string keys, i32 values.
         out.append("%ow.intmap.entry = type { %ow.string, i32, %ow.intmap.entry* }\n");
-        out.append("%ow.intmap = type { %ow.intmap.entry*, i32, i32 }\n");
+        out.append("%ow.intmap = type { %ow.intmap.entry**, i32, i32, i32 }\n");
         out.append("%ow.strmap.entry = type { %ow.string, %ow.string, %ow.strmap.entry* }\n");
-        out.append("%ow.strmap = type { %ow.strmap.entry*, i32, i32 }\n");
+        out.append("%ow.strmap = type { %ow.strmap.entry**, i32, i32, i32 }\n");
         out.append("%ow.mixed = type { i32, i32, %ow.string }\n");
         out.append("%ow.mixedmap.entry = type { %ow.string, %ow.mixed, %ow.mixedmap.entry* }\n");
-        out.append("%ow.mixedmap = type { %ow.mixedmap.entry*, i32, i32 }\n");
+        out.append("%ow.mixedmap = type { %ow.mixedmap.entry**, i32, i32, i32 }\n");
         out.append("declare i8* @calloc(i64, i64)\n");
         out.append("declare void @free(i8*)\n");
         out.append("declare void @abort() noreturn\n");
@@ -92,6 +92,7 @@ public class LlvmIrGen {
         out.append(nativeStringHelpers());
         out.append(nativeOwnedStringHelpers());
         out.append(nativeStringArrayHelpers());
+        out.append(NativeHashMapIr.hashHelper());
         out.append(nativeIntegerMapHelpers());
         out.append(NativeStringMapIr.generate());
         out.append(NativeMixedMapIr.generate());
@@ -1389,206 +1390,7 @@ public class LlvmIrGen {
      * Dynamic key strings are owned by the nodes, and released with them.
      */
     private static String nativeIntegerMapHelpers() {
-        return """
-                define %ow.intmap* @__ow_native_intmap_new() {
-                entry:
-                  %end = getelementptr %ow.intmap, %ow.intmap* null, i32 1
-                  %bytes = ptrtoint %ow.intmap* %end to i64
-                  %raw = call i8* @calloc(i64 1, i64 %bytes)
-                  %ok = icmp ne i8* %raw, null
-                  br i1 %ok, label %created, label %oom
-                oom:
-                  call void @abort()
-                  unreachable
-                created:
-                  %map = bitcast i8* %raw to %ow.intmap*
-                  %refs = getelementptr %ow.intmap, %ow.intmap* %map, i32 0, i32 1
-                  store i32 1, i32* %refs
-                  ret %ow.intmap* %map
-                }
-
-                define void @__ow_native_intmap_retain(%ow.intmap* %map) {
-                entry:
-                  %absent = icmp eq %ow.intmap* %map, null
-                  br i1 %absent, label %done, label %retain
-                retain:
-                  %refs = getelementptr %ow.intmap, %ow.intmap* %map, i32 0, i32 1
-                  %before = load i32, i32* %refs
-                  %after = add i32 %before, 1
-                  store i32 %after, i32* %refs
-                  br label %done
-                done:
-                  ret void
-                }
-
-                define void @__ow_native_intmap_release(%ow.intmap* %map) {
-                entry:
-                  %absent = icmp eq %ow.intmap* %map, null
-                  br i1 %absent, label %done, label %decrement
-                decrement:
-                  %refs = getelementptr %ow.intmap, %ow.intmap* %map, i32 0, i32 1
-                  %before = load i32, i32* %refs
-                  %after = sub i32 %before, 1
-                  store i32 %after, i32* %refs
-                  %last = icmp eq i32 %after, 0
-                  br i1 %last, label %startCleanup, label %done
-                startCleanup:
-                  %headPtr = getelementptr %ow.intmap, %ow.intmap* %map, i32 0, i32 0
-                  %head = load %ow.intmap.entry*, %ow.intmap.entry** %headPtr
-                  br label %loop
-                loop:
-                  %nodeToFree = phi %ow.intmap.entry* [ %head, %startCleanup ], [ %next, %freeNode ]
-                  %empty = icmp eq %ow.intmap.entry* %nodeToFree, null
-                  br i1 %empty, label %disposeMap, label %freeNode
-                freeNode:
-                  %keyPtr = getelementptr %ow.intmap.entry, %ow.intmap.entry* %nodeToFree, i32 0, i32 0
-                  %key = load %ow.string, %ow.string* %keyPtr
-                  call void @__ow_native_string_release(%ow.string %key)
-                  %nextPtr = getelementptr %ow.intmap.entry, %ow.intmap.entry* %nodeToFree, i32 0, i32 2
-                  %next = load %ow.intmap.entry*, %ow.intmap.entry** %nextPtr
-                  %rawNode = bitcast %ow.intmap.entry* %nodeToFree to i8*
-                  call void @free(i8* %rawNode)
-                  br label %loop
-                disposeMap:
-                  %rawMap = bitcast %ow.intmap* %map to i8*
-                  call void @free(i8* %rawMap)
-                  br label %done
-                done:
-                  ret void
-                }
-
-                define %ow.intmap.entry* @__ow_native_intmap_find(%ow.intmap* %map, %ow.string %key) {
-                entry:
-                  %headPtr = getelementptr %ow.intmap, %ow.intmap* %map, i32 0, i32 0
-                  %head = load %ow.intmap.entry*, %ow.intmap.entry** %headPtr
-                  %requested = extractvalue %ow.string %key, 0
-                  br label %loop
-                loop:
-                  %node = phi %ow.intmap.entry* [ %head, %entry ], [ %next, %advance ]
-                  %empty = icmp eq %ow.intmap.entry* %node, null
-                  br i1 %empty, label %missing, label %compare
-                compare:
-                  %storedPtr = getelementptr %ow.intmap.entry, %ow.intmap.entry* %node, i32 0, i32 0
-                  %stored = load %ow.string, %ow.string* %storedPtr
-                  %storedBytes = extractvalue %ow.string %stored, 0
-                  %diff = call i32 @strcmp(i8* %requested, i8* %storedBytes)
-                  %equal = icmp eq i32 %diff, 0
-                  br i1 %equal, label %found, label %advance
-                advance:
-                  %nextPtr = getelementptr %ow.intmap.entry, %ow.intmap.entry* %node, i32 0, i32 2
-                  %next = load %ow.intmap.entry*, %ow.intmap.entry** %nextPtr
-                  br label %loop
-                found:
-                  ret %ow.intmap.entry* %node
-                missing:
-                  ret %ow.intmap.entry* null
-                }
-
-                define void @__ow_native_intmap_set(%ow.intmap* %map, %ow.string %key, i32 %value) {
-                entry:
-                  %old = call %ow.intmap.entry* @__ow_native_intmap_find(%ow.intmap* %map, %ow.string %key)
-                  %absent = icmp eq %ow.intmap.entry* %old, null
-                  br i1 %absent, label %insert, label %update
-                update:
-                  %valuePtr = getelementptr %ow.intmap.entry, %ow.intmap.entry* %old, i32 0, i32 1
-                  store i32 %value, i32* %valuePtr
-                  call void @__ow_native_string_release(%ow.string %key)
-                  br label %done
-                insert:
-                  %end = getelementptr %ow.intmap.entry, %ow.intmap.entry* null, i32 1
-                  %bytes = ptrtoint %ow.intmap.entry* %end to i64
-                  %raw = call i8* @calloc(i64 1, i64 %bytes)
-                  %ok = icmp ne i8* %raw, null
-                  br i1 %ok, label %store, label %oom
-                oom:
-                  call void @__ow_native_string_release(%ow.string %key)
-                  call void @abort()
-                  unreachable
-                store:
-                  %node = bitcast i8* %raw to %ow.intmap.entry*
-                  %keyPtr = getelementptr %ow.intmap.entry, %ow.intmap.entry* %node, i32 0, i32 0
-                  store %ow.string %key, %ow.string* %keyPtr
-                  %slot = getelementptr %ow.intmap.entry, %ow.intmap.entry* %node, i32 0, i32 1
-                  store i32 %value, i32* %slot
-                  %headPtr = getelementptr %ow.intmap, %ow.intmap* %map, i32 0, i32 0
-                  %previous = load %ow.intmap.entry*, %ow.intmap.entry** %headPtr
-                  %nextPtr = getelementptr %ow.intmap.entry, %ow.intmap.entry* %node, i32 0, i32 2
-                  store %ow.intmap.entry* %previous, %ow.intmap.entry** %nextPtr
-                  store %ow.intmap.entry* %node, %ow.intmap.entry** %headPtr
-                  %countPtr = getelementptr %ow.intmap, %ow.intmap* %map, i32 0, i32 2
-                  %count = load i32, i32* %countPtr
-                  %countNext = add i32 %count, 1
-                  store i32 %countNext, i32* %countPtr
-                  br label %done
-                done:
-                  ret void
-                }
-
-                define i32 @__ow_native_intmap_get(%ow.intmap* %map, %ow.string %key) {
-                entry:
-                  %found = call %ow.intmap.entry* @__ow_native_intmap_find(%ow.intmap* %map, %ow.string %key)
-                  %missing = icmp eq %ow.intmap.entry* %found, null
-                  br i1 %missing, label %noKey, label %hasKey
-                noKey:
-                  call void @abort()
-                  unreachable
-                hasKey:
-                  %ptr = getelementptr %ow.intmap.entry, %ow.intmap.entry* %found, i32 0, i32 1
-                  %value = load i32, i32* %ptr
-                  ret i32 %value
-                }
-
-                define i1 @__ow_native_intmap_has(%ow.intmap* %map, %ow.string %key) {
-                entry:
-                  %found = call %ow.intmap.entry* @__ow_native_intmap_find(%ow.intmap* %map, %ow.string %key)
-                  %present = icmp ne %ow.intmap.entry* %found, null
-                  ret i1 %present
-                }
-
-                define i32 @__ow_native_intmap_size(%ow.intmap* %map) {
-                entry:
-                  %countPtr = getelementptr %ow.intmap, %ow.intmap* %map, i32 0, i32 2
-                  %count = load i32, i32* %countPtr
-                  ret i32 %count
-                }
-
-                define void @__ow_native_intmap_delete(%ow.intmap* %map, %ow.string %key) {
-                entry:
-                  %headPtr = getelementptr %ow.intmap, %ow.intmap* %map, i32 0, i32 0
-                  %requested = extractvalue %ow.string %key, 0
-                  br label %loop
-                loop:
-                  %link = phi %ow.intmap.entry** [ %headPtr, %entry ], [ %nextLink, %advance ]
-                  %node = load %ow.intmap.entry*, %ow.intmap.entry** %link
-                  %empty = icmp eq %ow.intmap.entry* %node, null
-                  br i1 %empty, label %done, label %compare
-                compare:
-                  %keyPtr = getelementptr %ow.intmap.entry, %ow.intmap.entry* %node, i32 0, i32 0
-                  %stored = load %ow.string, %ow.string* %keyPtr
-                  %storedBytes = extractvalue %ow.string %stored, 0
-                  %diff = call i32 @strcmp(i8* %requested, i8* %storedBytes)
-                  %same = icmp eq i32 %diff, 0
-                  br i1 %same, label %remove, label %advance
-                advance:
-                  %nextLink = getelementptr %ow.intmap.entry, %ow.intmap.entry* %node, i32 0, i32 2
-                  br label %loop
-                remove:
-                  %nextPtr = getelementptr %ow.intmap.entry, %ow.intmap.entry* %node, i32 0, i32 2
-                  %next = load %ow.intmap.entry*, %ow.intmap.entry** %nextPtr
-                  store %ow.intmap.entry* %next, %ow.intmap.entry** %link
-                  call void @__ow_native_string_release(%ow.string %stored)
-                  %rawNode = bitcast %ow.intmap.entry* %node to i8*
-                  call void @free(i8* %rawNode)
-                  %countPtr = getelementptr %ow.intmap, %ow.intmap* %map, i32 0, i32 2
-                  %count = load i32, i32* %countPtr
-                  %countNext = sub i32 %count, 1
-                  store i32 %countNext, i32* %countPtr
-                  br label %done
-                done:
-                  ret void
-                }
-
-                """;
+        return NativeHashMapIr.generate("intmap", "i32", null, null);
     }
 
     private static String nativeStringArrayHelpers() {

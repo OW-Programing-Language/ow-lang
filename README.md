@@ -108,8 +108,10 @@ string, or mixed integer/string values**, with `map_get` (lazy fallback),
 Literals `{ name: "OW", version: 6 }` select a tagged `mixed_map`
 representation, retaining the separate `int_map` and `string_map` ABI
 for homogeneous values. Reference counting releases dynamically owned
-strings on replacement, deletion and map cleanup. Native nested dictionaries
-and iteration are not supported. See
+strings on replacement, deletion and map cleanup. Native lookup, insertion and deletion now use a shared **resizing UTF-8 hash
+table** (average O(1), worst-case O(n)), rather than a linear scan.
+Native nested dictionaries and iteration are not supported. See
+[hash-table implementation](docs/native-hash-dictionaries.md),
 [native mixed dictionaries](docs/native-mixed-dictionaries.md),
 [native integer maps](docs/native-int-dictionaries.md) and
 [native string maps](docs/native-string-dictionaries.md).

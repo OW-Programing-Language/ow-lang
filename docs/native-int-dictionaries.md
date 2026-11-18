@@ -41,12 +41,11 @@ interpreter.** String-valued dictionaries now have a separate experimental
 Heterogeneous/nested values, objects, null, and floating-point values are
 not yet supported by the LLVM backend. The interpreter supports them.
 
-The LLVM implementation currently uses a *linked-list search* over dictionary
-entries rather than a hash table. Lookup/insertion is O(n), whereas the
-interpreter uses an insertion-ordered hash map with average O(1) lookup.
-`map_keys`, `map_values`, `json` and `json_parse` are not yet lowered
-natively; native dictionaries cannot be enumerated. Subsequent milestones
-will add a hash table and ownership-aware value variants.
+The LLVM implementation now uses a shared, automatically resizing
+[hash-table runtime](native-hash-dictionaries.md), with separate chains for
+collisions and average O(1) lookup, insertion and deletion. `map_keys`,
+`map_values`, `json` and `json_parse` are not yet lowered natively;
+native dictionaries cannot be enumerated.
 
 Missing keys abort rather than raise OW exceptions. Reference counters are
 not atomic, and native dictionaries cannot create reference cycles in this

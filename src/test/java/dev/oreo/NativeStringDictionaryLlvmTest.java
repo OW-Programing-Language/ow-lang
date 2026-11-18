@@ -17,7 +17,7 @@ public class NativeStringDictionaryLlvmTest {
                   print: m["Blaze"]
                 """);
         assertTrue(llvm.contains("%ow.strmap.entry = type { %ow.string, %ow.string, %ow.strmap.entry* }"));
-        assertTrue(llvm.contains("%ow.strmap = type { %ow.strmap.entry*, i32, i32 }"));
+        assertTrue(llvm.contains("%ow.strmap = type { %ow.strmap.entry**, i32, i32, i32 }"));
         assertTrue(llvm.contains("call %ow.strmap* @__ow_native_strmap_new()"));
         assertTrue(llvm.contains("call void @__ow_native_strmap_set(%ow.strmap*"));
         assertTrue(llvm.contains("call %ow.string @__ow_native_strmap_get(%ow.strmap*"));
