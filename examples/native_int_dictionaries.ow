@@ -1,0 +1,42 @@
+# OW native dictionary subset: string keys and integer values.
+fn fallback():
+  returns: int
+  print: 999
+  return: 40
+
+fn make():
+  returns: int_map
+  return: { "Created": 19, "Another": 5 }
+
+fn getOr(m: int_map, k: string):
+  returns: int
+  return: map_get(m, k, 0)
+
+main:
+  set scores: { "Alice": 10, "Bob": 20 }
+  print: scores["Bob"]
+  set dynamicKey: "Bo" + "b"
+  print: scores[dynamicKey]
+  set alias: scores
+  set scores["Bob"]: 23
+  print: alias["Bob"]
+  set scores["Charlie"]: 30
+  print: map_size(alias)
+  print: map_has(alias, "Charlie")
+  print: map_has(alias, "Missing")
+  print: map_get(alias, "Bob", fallback())
+  print: map_get(alias, "Unknown", 40)
+  set alias: map_delete(alias, "Alice")
+  print: map_size(scores)
+  set single: map_set({}, "Key" + " One", 44)
+  print: single["Key One"]
+  set unicode: { "été": 77 }
+  print: unicode["é" + "té"]
+  print: getOr(make(), "Created")
+  print: getOr(make(), "Unknown")
+
+  set i: 0
+  while: i < 40
+    set current: map_set({}, "loop" + " key", i)
+    set i: i + 1
+  print: current["loop key"]

@@ -39,7 +39,8 @@ public class LlvmIrGen {
         functionSignatures.clear();
         for (Ast.FnDecl fn : program.functions) {
             if (fn.name.startsWith("__ow_native_array_") || fn.name.startsWith("__ow_native_string_")
-                    || fn.name.startsWith("__ow_native_strarray_")) {
+                    || fn.name.startsWith("__ow_native_strarray_")
+                    || fn.name.startsWith("__ow_native_intmap_")) {
                 throw new RuntimeException("LLVM backend: reserved native runtime function name: " + fn.name);
             }
             if (!functionNames.add(fn.name)) {
@@ -67,17 +68,23 @@ public class LlvmIrGen {
         out.append("%ow.string = type { i8*, i32* }\n");
         // String arrays carry refcounted %ow.string elements and own them.
         out.append("%ow.strarray = type { i32, %ow.string*, i32* }\n");
+        // First native dictionary subset: string keys, i32 values.
+        out.append("%ow.intmap.entry = type { %ow.string, i32, %ow.intmap.entry* }\n");
+        out.append("%ow.intmap = type { %ow.intmap.entry*, i32, i32 }\n");
         out.append("declare i8* @calloc(i64, i64)\n");
         out.append("declare void @free(i8*)\n");
         out.append("declare void @abort() noreturn\n");
         out.append("@.fmt_int = private constant [4 x i8] c\"%d\\0A\\00\"\n");
         out.append("@.fmt_str = private constant [4 x i8] c\"%s\\0A\\00\"\n");
+        out.append("@.bool_true = private constant [5 x i8] c\"true\\00\"\n");
+        out.append("@.bool_false = private constant [6 x i8] c\"false\\00\"\n");
         out.append(globals);
         out.append('\n');
         out.append(nativeArrayHelpers());
         out.append(nativeStringHelpers());
         out.append(nativeOwnedStringHelpers());
         out.append(nativeStringArrayHelpers());
+        out.append(nativeIntegerMapHelpers());
         out.append(fnsCode);
         return out.toString();
     }
@@ -144,6 +151,8 @@ public class LlvmIrGen {
             body.append("  ret ").append(currentReturnType).append(" zeroinitializer\n");
         } else if (currentReturnType.equals("%ow.string")) {
             body.append("  ret %ow.string zeroinitializer\n");
+        } else if (currentReturnType.equals("%ow.intmap*")) {
+            body.append("  ret %ow.intmap* null\n");
         } else {
             body.append("  ret i32 0\n");
         }
@@ -210,9 +219,22 @@ public class LlvmIrGen {
         }
 
         if (st instanceof Ast.SetIndexStmt set) {
-            // OW evaluates the array and index before the assigned value.
+            // OW evaluates the container and index before the assigned value.
             Value array = genExpr(new Ast.Var(set.name));
             Value index = genExpr(set.index);
+            if (array.type.equals("%ow.intmap*")) {
+                requireIntegerMapKey(index);
+                Value value = genExpr(set.value);
+                if (!value.type.equals("i32")) {
+                    throw new RuntimeException("LLVM backend: native dictionaries currently require integer values");
+                }
+                // map_set takes ownership of exactly one key reference.
+                if (!index.owned) retainManaged(index);
+                body.append("  call void @__ow_native_intmap_set(%ow.intmap* ")
+                        .append(array.ref).append(", %ow.string ")
+                        .append(index.ref).append(", i32 ").append(value.ref).append(")\n");
+                return;
+            }
             String elementPtr = checkedArrayElement(array, index);
             Value value = genExpr(set.value);
             if (array.type.equals("%ow.strarray")) {
@@ -241,7 +263,22 @@ public class LlvmIrGen {
         if (st instanceof Ast.PrintStmt p) {
             Value v = genExpr(p.value);
             String fmtPtr = newTemp();
-            if (v.type.equals("i32")) {
+            if (v.type.equals("i1")) {
+                String truePtr = newTemp();
+                body.append("  ").append(truePtr)
+                        .append(" = getelementptr [5 x i8], [5 x i8]* @.bool_true, i32 0, i32 0\n");
+                String falsePtr = newTemp();
+                body.append("  ").append(falsePtr)
+                        .append(" = getelementptr [6 x i8], [6 x i8]* @.bool_false, i32 0, i32 0\n");
+                String boolText = newTemp();
+                body.append("  ").append(boolText).append(" = select i1 ")
+                        .append(v.ref).append(", i8* ").append(truePtr)
+                        .append(", i8* ").append(falsePtr).append("\n");
+                body.append("  ").append(fmtPtr)
+                        .append(" = getelementptr [4 x i8], [4 x i8]* @.fmt_str, i32 0, i32 0\n");
+                body.append("  call i32 (i8*, ...) @printf(i8* ").append(fmtPtr)
+                        .append(", i8* ").append(boolText).append(")\n");
+            } else if (v.type.equals("i32")) {
                 body.append("  ").append(fmtPtr)
                         .append(" = getelementptr [4 x i8], [4 x i8]* @.fmt_int, i32 0, i32 0\n");
                 body.append("  call i32 (i8*, ...) @printf(i8* ").append(fmtPtr)
@@ -397,6 +434,21 @@ public class LlvmIrGen {
             }
             return buildArrayValue(Integer.toString(count), storage.ref);
         }
+        if (e instanceof Ast.MapLit map) {
+            Value dictionary = createIntegerMap();
+            for (int i = 0; i < map.keys.size(); i++) {
+                Value key = genExpr(new Ast.StringLit(map.keys.get(i)));
+                Value val = genExpr(map.values.get(i));
+                if (!val.type.equals("i32")) {
+                    throw new RuntimeException("LLVM backend: native dictionary literals currently require integer values");
+                }
+                if (!key.owned) retainManaged(key);
+                body.append("  call void @__ow_native_intmap_set(%ow.intmap* ")
+                        .append(dictionary.ref).append(", %ow.string ")
+                        .append(key.ref).append(", i32 ").append(val.ref).append(")\n");
+            }
+            return dictionary;
+        }
         if (e instanceof Ast.Var v) {
             String ptr = locals.get(v.name);
             if (ptr == null) throw new RuntimeException("Undefined variable: " + v.name);
@@ -409,6 +461,16 @@ public class LlvmIrGen {
         if (e instanceof Ast.IndexExpr idx) {
             Value target = genExpr(idx.target);
             Value index = genExpr(idx.index);
+            if (target.type.equals("%ow.intmap*")) {
+                requireIntegerMapKey(index);
+                String found = newTemp();
+                body.append("  ").append(found)
+                        .append(" = call i32 @__ow_native_intmap_get(%ow.intmap* ")
+                        .append(target.ref).append(", %ow.string ").append(index.ref).append(")\n");
+                if (index.owned) releaseManaged(index);
+                if (target.owned) releaseManaged(target);
+                return new Value(found, "i32");
+            }
             String ptr = checkedArrayElement(target, index);
             String result = newTemp();
             if (target.type.equals("%ow.strarray")) {
@@ -499,6 +561,9 @@ public class LlvmIrGen {
             return new Value(t, "i1");
         }
         if (e instanceof Ast.CallExpr call) {
+            if (call.name.startsWith("map_")) {
+                return genIntegerMapBuiltin(call);
+            }
             if (call.name.equals("len")) {
                 if (call.args.size() != 1)
                     throw new RuntimeException("LLVM backend: len expects one argument");
@@ -583,6 +648,132 @@ public class LlvmIrGen {
      * calloc(0,4) behavior. Allocation failure terminates rather than
      * performing a null dereference.
      */
+    private void requireIntegerMapKey(Value key) {
+        if (!key.type.equals("%ow.string")) {
+            throw new RuntimeException("LLVM backend: dictionary keys must be strings");
+        }
+    }
+
+    private Value createIntegerMap() {
+        String result = newTemp();
+        body.append("  ").append(result)
+                .append(" = call %ow.intmap* @__ow_native_intmap_new()\n");
+        return new Value(result, "%ow.intmap*", true);
+    }
+
+    private Value mapArgument(Ast.CallExpr call, int index) {
+        Value map = genExpr(call.args.get(index));
+        if (!map.type.equals("%ow.intmap*")) {
+            throw new RuntimeException("LLVM backend: " + call.name
+                    + " expects an integer-valued dictionary");
+        }
+        return map;
+    }
+
+    private Value mapKeyArgument(Ast.CallExpr call, int index) {
+        Value key = genExpr(call.args.get(index));
+        requireIntegerMapKey(key);
+        return key;
+    }
+
+    private Value genIntegerMapBuiltin(Ast.CallExpr call) {
+        String name = call.name;
+        int count = call.args.size();
+        int arity = switch (name) {
+            case "map_size" -> 1;
+            case "map_has", "map_delete" -> 2;
+            case "map_get", "map_set" -> 3;
+            default -> throw new RuntimeException("LLVM backend: builtin '" + name
+                    + "' is not yet supported for native dictionaries");
+        };
+        if (count != arity) {
+            throw new RuntimeException("LLVM backend: " + name + " expects "
+                    + arity + " argument(s)");
+        }
+        Value map = mapArgument(call, 0);
+        if (name.equals("map_size")) {
+            String result = newTemp();
+            body.append("  ").append(result)
+                    .append(" = call i32 @__ow_native_intmap_size(%ow.intmap* ")
+                    .append(map.ref).append(")\n");
+            if (map.owned) releaseManaged(map);
+            return new Value(result, "i32");
+        }
+        Value key = mapKeyArgument(call, 1);
+        if (name.equals("map_set")) {
+            Value value = genExpr(call.args.get(2));
+            if (!value.type.equals("i32")) {
+                throw new RuntimeException("LLVM backend: map_set requires an integer value");
+            }
+            // Set consumes one key reference and returns the original map.
+            if (!key.owned) retainManaged(key);
+            body.append("  call void @__ow_native_intmap_set(%ow.intmap* ")
+                    .append(map.ref).append(", %ow.string ").append(key.ref)
+                    .append(", i32 ").append(value.ref).append(")\n");
+            return map;
+        }
+        if (name.equals("map_delete")) {
+            body.append("  call void @__ow_native_intmap_delete(%ow.intmap* ")
+                    .append(map.ref).append(", %ow.string ").append(key.ref).append(")\n");
+            if (key.owned) releaseManaged(key);
+            return map;
+        }
+        if (name.equals("map_has")) {
+            String result = newTemp();
+            body.append("  ").append(result)
+                    .append(" = call i1 @__ow_native_intmap_has(%ow.intmap* ")
+                    .append(map.ref).append(", %ow.string ").append(key.ref).append(")\n");
+            if (key.owned) releaseManaged(key);
+            if (map.owned) releaseManaged(map);
+            return new Value(result, "i1");
+        }
+        if (name.equals("map_get")) {
+            // map_get fallback is lazy: do not evaluate a fallback expression
+            // when the requested key is already in the dictionary.
+            String found = newTemp();
+            body.append("  ").append(found)
+                    .append(" = call %ow.intmap.entry* @__ow_native_intmap_find(%ow.intmap* ")
+                    .append(map.ref).append(", %ow.string ").append(key.ref).append(")\n");
+            String present = newTemp();
+            body.append("  ").append(present).append(" = icmp ne %ow.intmap.entry* ")
+                    .append(found).append(", null\n");
+            int id = labelId++;
+            String exists = "intmap.get.present." + id;
+            String absent = "intmap.get.absent." + id;
+            String end = "intmap.get.end." + id;
+            String slot = newTemp();
+            entryAllocs.append("  ").append(slot).append(" = alloca i32\n");
+            body.append("  br i1 ").append(present).append(", label %")
+                    .append(exists).append(", label %").append(absent).append("\n");
+            body.append(exists).append(":\n");
+            String valuePtr = newTemp();
+            body.append("  ").append(valuePtr).append(" = getelementptr %ow.intmap.entry, %ow.intmap.entry* ")
+                    .append(found).append(", i32 0, i32 1\n");
+            String current = newTemp();
+            body.append("  ").append(current).append(" = load i32, i32* ")
+                    .append(valuePtr).append("\n");
+            body.append("  store i32 ").append(current).append(", i32* ")
+                    .append(slot).append("\n");
+            body.append("  br label %").append(end).append("\n");
+            body.append(absent).append(":\n");
+            Value fallback = genExpr(call.args.get(2));
+            if (!fallback.type.equals("i32")) {
+                throw new RuntimeException("LLVM backend: map_get fallback must be an integer");
+            }
+            body.append("  store i32 ").append(fallback.ref).append(", i32* ")
+                    .append(slot).append("\n");
+            body.append("  br label %").append(end).append("\n");
+            body.append(end).append(":\n");
+            String answer = newTemp();
+            body.append("  ").append(answer).append(" = load i32, i32* ")
+                    .append(slot).append("\n");
+            if (key.owned) releaseManaged(key);
+            if (map.owned) releaseManaged(map);
+            return new Value(answer, "i32");
+        }
+        throw new IllegalStateException("Unchecked map builtin: " + name);
+    }
+
     private Value allocatedArrayData(int count) {
         return allocatedArrayDataRaw(Integer.toString(Math.max(1, count)));
     }
@@ -832,7 +1023,7 @@ public class LlvmIrGen {
 
     private static boolean isManaged(String type) {
         return type.equals("%ow.array") || type.equals("%ow.string")
-                || type.equals("%ow.strarray");
+                || type.equals("%ow.strarray") || type.equals("%ow.intmap*");
     }
 
     private String stringData(Value string) {
@@ -844,6 +1035,9 @@ public class LlvmIrGen {
 
     private void retainManaged(Value value) {
         if (value.type.equals("%ow.array")) retainArray(value);
+        else if (value.type.equals("%ow.intmap*"))
+            body.append("  call void @__ow_native_intmap_retain(%ow.intmap* ")
+                    .append(value.ref).append(")\n");
         else if (value.type.equals("%ow.strarray"))
             body.append("  call void @__ow_native_strarray_retain(%ow.strarray ")
                     .append(value.ref).append(")\n");
@@ -855,6 +1049,9 @@ public class LlvmIrGen {
 
     private void releaseManaged(Value value) {
         if (value.type.equals("%ow.array")) releaseArray(value);
+        else if (value.type.equals("%ow.intmap*"))
+            body.append("  call void @__ow_native_intmap_release(%ow.intmap* ")
+                    .append(value.ref).append(")\n");
         else if (value.type.equals("%ow.strarray"))
             body.append("  call void @__ow_native_strarray_release(%ow.strarray ")
                     .append(value.ref).append(")\n");
@@ -882,6 +1079,213 @@ public class LlvmIrGen {
      * last owner destruction walks every child and releases the string.
      * Works with statically allocated literals and heap string concat values.
      */
+    /** Native string-keyed dictionaries restricted to i32 values.
+     * The singly-linked nodes live on the heap and preserve aliases.
+     * Dynamic key strings are owned by the nodes, and released with them.
+     */
+    private static String nativeIntegerMapHelpers() {
+        return """
+                define %ow.intmap* @__ow_native_intmap_new() {
+                entry:
+                  %end = getelementptr %ow.intmap, %ow.intmap* null, i32 1
+                  %bytes = ptrtoint %ow.intmap* %end to i64
+                  %raw = call i8* @calloc(i64 1, i64 %bytes)
+                  %ok = icmp ne i8* %raw, null
+                  br i1 %ok, label %created, label %oom
+                oom:
+                  call void @abort()
+                  unreachable
+                created:
+                  %map = bitcast i8* %raw to %ow.intmap*
+                  %refs = getelementptr %ow.intmap, %ow.intmap* %map, i32 0, i32 1
+                  store i32 1, i32* %refs
+                  ret %ow.intmap* %map
+                }
+
+                define void @__ow_native_intmap_retain(%ow.intmap* %map) {
+                entry:
+                  %absent = icmp eq %ow.intmap* %map, null
+                  br i1 %absent, label %done, label %retain
+                retain:
+                  %refs = getelementptr %ow.intmap, %ow.intmap* %map, i32 0, i32 1
+                  %before = load i32, i32* %refs
+                  %after = add i32 %before, 1
+                  store i32 %after, i32* %refs
+                  br label %done
+                done:
+                  ret void
+                }
+
+                define void @__ow_native_intmap_release(%ow.intmap* %map) {
+                entry:
+                  %absent = icmp eq %ow.intmap* %map, null
+                  br i1 %absent, label %done, label %decrement
+                decrement:
+                  %refs = getelementptr %ow.intmap, %ow.intmap* %map, i32 0, i32 1
+                  %before = load i32, i32* %refs
+                  %after = sub i32 %before, 1
+                  store i32 %after, i32* %refs
+                  %last = icmp eq i32 %after, 0
+                  br i1 %last, label %startCleanup, label %done
+                startCleanup:
+                  %headPtr = getelementptr %ow.intmap, %ow.intmap* %map, i32 0, i32 0
+                  %head = load %ow.intmap.entry*, %ow.intmap.entry** %headPtr
+                  br label %loop
+                loop:
+                  %nodeToFree = phi %ow.intmap.entry* [ %head, %startCleanup ], [ %next, %freeNode ]
+                  %empty = icmp eq %ow.intmap.entry* %nodeToFree, null
+                  br i1 %empty, label %disposeMap, label %freeNode
+                freeNode:
+                  %keyPtr = getelementptr %ow.intmap.entry, %ow.intmap.entry* %nodeToFree, i32 0, i32 0
+                  %key = load %ow.string, %ow.string* %keyPtr
+                  call void @__ow_native_string_release(%ow.string %key)
+                  %nextPtr = getelementptr %ow.intmap.entry, %ow.intmap.entry* %nodeToFree, i32 0, i32 2
+                  %next = load %ow.intmap.entry*, %ow.intmap.entry** %nextPtr
+                  %rawNode = bitcast %ow.intmap.entry* %nodeToFree to i8*
+                  call void @free(i8* %rawNode)
+                  br label %loop
+                disposeMap:
+                  %rawMap = bitcast %ow.intmap* %map to i8*
+                  call void @free(i8* %rawMap)
+                  br label %done
+                done:
+                  ret void
+                }
+
+                define %ow.intmap.entry* @__ow_native_intmap_find(%ow.intmap* %map, %ow.string %key) {
+                entry:
+                  %headPtr = getelementptr %ow.intmap, %ow.intmap* %map, i32 0, i32 0
+                  %head = load %ow.intmap.entry*, %ow.intmap.entry** %headPtr
+                  %requested = extractvalue %ow.string %key, 0
+                  br label %loop
+                loop:
+                  %node = phi %ow.intmap.entry* [ %head, %entry ], [ %next, %advance ]
+                  %empty = icmp eq %ow.intmap.entry* %node, null
+                  br i1 %empty, label %missing, label %compare
+                compare:
+                  %storedPtr = getelementptr %ow.intmap.entry, %ow.intmap.entry* %node, i32 0, i32 0
+                  %stored = load %ow.string, %ow.string* %storedPtr
+                  %storedBytes = extractvalue %ow.string %stored, 0
+                  %diff = call i32 @strcmp(i8* %requested, i8* %storedBytes)
+                  %equal = icmp eq i32 %diff, 0
+                  br i1 %equal, label %found, label %advance
+                advance:
+                  %nextPtr = getelementptr %ow.intmap.entry, %ow.intmap.entry* %node, i32 0, i32 2
+                  %next = load %ow.intmap.entry*, %ow.intmap.entry** %nextPtr
+                  br label %loop
+                found:
+                  ret %ow.intmap.entry* %node
+                missing:
+                  ret %ow.intmap.entry* null
+                }
+
+                define void @__ow_native_intmap_set(%ow.intmap* %map, %ow.string %key, i32 %value) {
+                entry:
+                  %old = call %ow.intmap.entry* @__ow_native_intmap_find(%ow.intmap* %map, %ow.string %key)
+                  %absent = icmp eq %ow.intmap.entry* %old, null
+                  br i1 %absent, label %insert, label %update
+                update:
+                  %valuePtr = getelementptr %ow.intmap.entry, %ow.intmap.entry* %old, i32 0, i32 1
+                  store i32 %value, i32* %valuePtr
+                  call void @__ow_native_string_release(%ow.string %key)
+                  br label %done
+                insert:
+                  %end = getelementptr %ow.intmap.entry, %ow.intmap.entry* null, i32 1
+                  %bytes = ptrtoint %ow.intmap.entry* %end to i64
+                  %raw = call i8* @calloc(i64 1, i64 %bytes)
+                  %ok = icmp ne i8* %raw, null
+                  br i1 %ok, label %store, label %oom
+                oom:
+                  call void @__ow_native_string_release(%ow.string %key)
+                  call void @abort()
+                  unreachable
+                store:
+                  %node = bitcast i8* %raw to %ow.intmap.entry*
+                  %keyPtr = getelementptr %ow.intmap.entry, %ow.intmap.entry* %node, i32 0, i32 0
+                  store %ow.string %key, %ow.string* %keyPtr
+                  %slot = getelementptr %ow.intmap.entry, %ow.intmap.entry* %node, i32 0, i32 1
+                  store i32 %value, i32* %slot
+                  %headPtr = getelementptr %ow.intmap, %ow.intmap* %map, i32 0, i32 0
+                  %previous = load %ow.intmap.entry*, %ow.intmap.entry** %headPtr
+                  %nextPtr = getelementptr %ow.intmap.entry, %ow.intmap.entry* %node, i32 0, i32 2
+                  store %ow.intmap.entry* %previous, %ow.intmap.entry** %nextPtr
+                  store %ow.intmap.entry* %node, %ow.intmap.entry** %headPtr
+                  %countPtr = getelementptr %ow.intmap, %ow.intmap* %map, i32 0, i32 2
+                  %count = load i32, i32* %countPtr
+                  %countNext = add i32 %count, 1
+                  store i32 %countNext, i32* %countPtr
+                  br label %done
+                done:
+                  ret void
+                }
+
+                define i32 @__ow_native_intmap_get(%ow.intmap* %map, %ow.string %key) {
+                entry:
+                  %found = call %ow.intmap.entry* @__ow_native_intmap_find(%ow.intmap* %map, %ow.string %key)
+                  %missing = icmp eq %ow.intmap.entry* %found, null
+                  br i1 %missing, label %noKey, label %hasKey
+                noKey:
+                  call void @abort()
+                  unreachable
+                hasKey:
+                  %ptr = getelementptr %ow.intmap.entry, %ow.intmap.entry* %found, i32 0, i32 1
+                  %value = load i32, i32* %ptr
+                  ret i32 %value
+                }
+
+                define i1 @__ow_native_intmap_has(%ow.intmap* %map, %ow.string %key) {
+                entry:
+                  %found = call %ow.intmap.entry* @__ow_native_intmap_find(%ow.intmap* %map, %ow.string %key)
+                  %present = icmp ne %ow.intmap.entry* %found, null
+                  ret i1 %present
+                }
+
+                define i32 @__ow_native_intmap_size(%ow.intmap* %map) {
+                entry:
+                  %countPtr = getelementptr %ow.intmap, %ow.intmap* %map, i32 0, i32 2
+                  %count = load i32, i32* %countPtr
+                  ret i32 %count
+                }
+
+                define void @__ow_native_intmap_delete(%ow.intmap* %map, %ow.string %key) {
+                entry:
+                  %headPtr = getelementptr %ow.intmap, %ow.intmap* %map, i32 0, i32 0
+                  %requested = extractvalue %ow.string %key, 0
+                  br label %loop
+                loop:
+                  %link = phi %ow.intmap.entry** [ %headPtr, %entry ], [ %nextLink, %advance ]
+                  %node = load %ow.intmap.entry*, %ow.intmap.entry** %link
+                  %empty = icmp eq %ow.intmap.entry* %node, null
+                  br i1 %empty, label %done, label %compare
+                compare:
+                  %keyPtr = getelementptr %ow.intmap.entry, %ow.intmap.entry* %node, i32 0, i32 0
+                  %stored = load %ow.string, %ow.string* %keyPtr
+                  %storedBytes = extractvalue %ow.string %stored, 0
+                  %diff = call i32 @strcmp(i8* %requested, i8* %storedBytes)
+                  %same = icmp eq i32 %diff, 0
+                  br i1 %same, label %remove, label %advance
+                advance:
+                  %nextLink = getelementptr %ow.intmap.entry, %ow.intmap.entry* %node, i32 0, i32 2
+                  br label %loop
+                remove:
+                  %nextPtr = getelementptr %ow.intmap.entry, %ow.intmap.entry* %node, i32 0, i32 2
+                  %next = load %ow.intmap.entry*, %ow.intmap.entry** %nextPtr
+                  store %ow.intmap.entry* %next, %ow.intmap.entry** %link
+                  call void @__ow_native_string_release(%ow.string %stored)
+                  %rawNode = bitcast %ow.intmap.entry* %node to i8*
+                  call void @free(i8* %rawNode)
+                  %countPtr = getelementptr %ow.intmap, %ow.intmap* %map, i32 0, i32 2
+                  %count = load i32, i32* %countPtr
+                  %countNext = sub i32 %count, 1
+                  store i32 %countNext, i32* %countPtr
+                  br label %done
+                done:
+                  ret void
+                }
+
+                """;
+    }
+
     private static String nativeStringArrayHelpers() {
         return """
                 define %ow.strarray @__ow_native_strarray_new(i32 %length) {
@@ -1149,6 +1553,9 @@ public class LlvmIrGen {
         }
         if (declaredType.equals("string_array")) {
             return "%ow.strarray";
+        }
+        if (declaredType.equals("int_map")) {
+            return "%ow.intmap*";
         }
         if (declaredType.equals("string")) {
             return "%ow.string";
