@@ -1,0 +1,50 @@
+name: OW native integer-valued dictionaries
+
+on:
+  pull_request:
+  push:
+    paths:
+      - 'src/**'
+      - 'examples/native_int_dictionaries*.ow'
+      - 'docs/native-int-dictionaries.md'
+      - '.github/workflows/native-int-dictionaries.yml'
+      - 'pom.xml'
+
+jobs:
+  native-int-dictionaries:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Build OW and all Java tests
+        run: mvn -B clean package
+      - name: Compile native int-valued maps under ASan and LSan
+        run: |
+          java -jar target/OwIDE.jar llvm examples/native_int_dictionaries.ow target/native-int-dictionaries.ll
+          clang -O0 -g -fsanitize=address -fno-omit-frame-pointer target/native-int-dictionaries.ll -o target/native-int-dictionaries
+      - name: Validate interpreter parity, ownership and lazy fallback
+        run: |
+          java -jar target/OwIDE.jar run examples/native_int_dictionaries.ow > target/intmap-interpreted.txt
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 ./target/native-int-dictionaries > target/intmap-native.txt
+          diff -u target/intmap-interpreted.txt target/intmap-native.txt
+          printf '20\n20\n23\n3\ntrue\nfalse\n23\n40\n2\n44\n77\n19\n0\n39\n' > target/intmap-expected.txt
+          diff -u target/intmap-expected.txt target/intmap-native.txt
+      - name: Missing key must fail with nonzero exit status
+        shell: bash
+        run: |
+          ulimit -c 0
+          java -jar target/OwIDE.jar llvm examples/native_int_dictionaries_missing.ow target/intmap-missing.ll
+          clang target/intmap-missing.ll -o target/intmap-missing
+          set +e
+          ./target/intmap-missing >/dev/null 2>&1
+          result=$?
+          set -e
+          if [ "$result" -eq 0 ]; then
+            echo "ERROR: native map accepted missing key"
+            exit 1
+          fi
+          echo "Missing key rejected with exit status $result"
