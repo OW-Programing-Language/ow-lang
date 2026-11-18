@@ -134,7 +134,7 @@ public class NativeMixedDictionaryLlvmTest {
                 main:
                   set m: { count: 3, nested: [1, 2] }
                 """));
-        assertTrue(e.getMessage().contains("values must be integers or strings"));
+        assertTrue(e.getMessage().contains("values must be integers, strings or maps"));
     }
 
     @Test public void integerMapRejectsStringTypeChange() {
