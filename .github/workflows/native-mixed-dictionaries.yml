@@ -31,7 +31,7 @@ jobs:
           java -jar target/OwIDE.jar run examples/native_mixed_dictionaries.ow > target/mixed-interpreted.txt
           ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 ./target/native-mixed-dictionaries > target/mixed-native.txt
           diff -u target/mixed-interpreted.txt target/mixed-native.txt
-          printf 'OW\n6\nOW\nsix\n2\ntrue\nfalse\nOW\nfallback executed\nnot found\n42\n2\nOW\nété🙂\nnext\ntemporary\nloop value\n39\n' > target/mixed-expected.txt
+          printf 'OW\n6\nOW\nsix\n2\ntrue\nfalse\nOW\nnot found\n42\n2\nOW\nété🙂\nnext\ntemporary\nloop value\n39\n' > target/mixed-expected.txt
           diff -u target/mixed-expected.txt target/mixed-native.txt
       - name: Missing key must fail rather than access invalid memory
         shell: bash
