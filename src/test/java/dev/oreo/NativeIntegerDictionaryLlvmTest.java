@@ -137,7 +137,7 @@ public class NativeIntegerDictionaryLlvmTest {
                   set m: {}
                   set m["a"]: "not an int"
                 """));
-        assertTrue(error.getMessage().contains("require integer values"));
+        assertTrue(error.getMessage().contains("requires integer values"));
     }
 
     @Test public void mapHasChecksArgumentCount() {
