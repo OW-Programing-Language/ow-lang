@@ -1457,7 +1457,7 @@ public class Interpreter {
             "sleep", "now_ms",
             "map_get", "map_has", "map_set", "map_delete",
             "map_keys", "map_values", "map_size",
-            "pack", "unpack", "assert", "extension"
+            "pack", "unpack", "module_scan", "assert", "extension"
     ));
 
     private static boolean isBuiltin(String name) { return BUILTINS.contains(name); }
@@ -1577,11 +1577,61 @@ public class Interpreter {
                 yield asRecord(evalExpr(call.args.get(0), env), "map_size").size();
             }
             case "pack" -> builtinPack(call, env);
+            case "module_scan" -> builtinModuleScan(call, env);
             case "unpack" -> builtinUnpack(call, env);
             case "assert" -> builtinAssert(call, env);
             case "extension" -> invokeExtension(call, env);
             default -> throw new RuntimeException("Unknown builtin: " + call.name);
         };
+    }
+
+
+    /**
+     * Returns the publicly reachable native OW modules in the loaded program
+     * whose signatures structurally satisfy the requested module_type.
+     *
+     * This is runtime *module* discovery, not an unrestricted filesystem scan.
+     * Imported declarations, qualified namespaces and main-scope functor
+     * instances can be discovered. Aliases of the same module value appear
+     * only once. Private lexical children are never traversed.
+     */
+    private Object builtinModuleScan(Ast.CallExpr call, Map<String, Object> env) {
+        requireArgCount(call, 1);
+        Object requested = evalExpr(call.args.get(0), env);
+        if (!(requested instanceof String name) || name.isBlank())
+            throw new RuntimeException("module_scan expects a nonempty module_type name");
+        Ast.ModuleTypeDecl contract = moduleTypes.get(name);
+        if (contract == null)
+            throw new RuntimeException("Unknown module type " + name);
+        List<Object> results = new ArrayList<>();
+        Set<OwModule> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+        // HashMap iteration is not stable: sort public global names for
+        // deterministic component ordering across JVMs and test runs.
+        for (Object value : new TreeMap<>(globals).values())
+            collectPublicModules(value, contract, seen, results);
+        return results;
+    }
+
+    private void collectPublicModules(Object value, Ast.ModuleTypeDecl contract,
+                                      Set<OwModule> seen, List<Object> results) {
+        if (value instanceof OwNamespace namespace) {
+            for (Object child : new TreeMap<>(namespace.members).values())
+                collectPublicModules(child, contract, seen, results);
+            return;
+        }
+        if (!(value instanceof OwModule module) || !seen.add(module))
+            return;
+        Ast.ModuleTypeDecl actual = moduleTypes.get(module.signature);
+        if (actual == null) return;
+        if (ModuleTypeChecker.matches(actual, contract))
+            results.add(module);
+        // Never enumerate private lexical children. Only the public module
+        // exports listed in the resolved signature may be reflected.
+        for (String publicChild : new TreeSet<>(actual.nestedModules.keySet())) {
+            OwModule child = module.children.get(publicChild);
+            if (child != null)
+                collectPublicModules(child, contract, seen, results);
+        }
     }
 
     private Object builtinPack(Ast.CallExpr call, Map<String, Object> env) {
