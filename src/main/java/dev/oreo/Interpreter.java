@@ -1737,6 +1737,7 @@ public class Interpreter {
             throw new IllegalStateException("Invalid @Repository metadata for " + cls.name);
         int expected = switch (method) {
             case "save", "findById", "existsById", "deleteById" -> 1;
+            case "updateById" -> 2;
             case "findAll" -> 0;
             case "page" -> 3;
             default -> throw new RuntimeException("Unknown repository operation: " + method);
