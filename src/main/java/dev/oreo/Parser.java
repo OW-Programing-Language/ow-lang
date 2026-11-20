@@ -393,6 +393,13 @@ public class Parser {
         }
         expect(Type.COLON);
         expect(Type.NEWLINE);
+        boolean generatedRepository = annotations.stream().anyMatch(a -> a.startsWith("Repository:"));
+        if (generatedRepository && annotations.size() != 1)
+            throw err("@Repository cannot be combined with other OW stereotypes");
+        // Generated repositories have no handwritten body; no INDENT token
+        // exists when the next declaration is already at top level.
+        if (generatedRepository && !check(Type.INDENT))
+            return new Ast.ClassDecl(name, supers, List.of(), List.of(), annotations);
         expect(Type.INDENT);
 
         List<Ast.FieldDecl> fields = new ArrayList<>();
