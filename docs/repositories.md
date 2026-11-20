@@ -29,6 +29,8 @@ main:
 
 - `save({id: id, column: value})` inserts one record. **INSERT only**;
   duplicate keys fail rather than silently replacing existing rows.
+- `updateById(id, {column: value})` updates explicit, non-ID columns,
+  returns 0 or 1 affected rows and never silently inserts a missing row.
 - `findById(id)` returns a single OW record or numeric **0** if missing.
 - `existsById(id)` returns 1/0.
 - `deleteById(id)` returns the JDBC rows affected (0/1).
@@ -48,7 +50,7 @@ request/thread-local JDBC connection as `@Transactional`, so an enclosing
 transaction commits or rolls back repository writes atomically.
 
 This is deliberately **not JPA or an ORM**: no lazy-loading,
-auto-migration, inferred entity mapping, automatic updates, derived
+auto-migration, inferred entity mapping, automatic upserts, derived
 `findByName`, generated IDs, `REQUIRES_NEW`, multi-DB XA transactions,
 or native LLVM lowering yet. Repository classes must be empty (no
 handwritten fields, methods or inheritance). Configure the schema with
