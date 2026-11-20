@@ -75,6 +75,17 @@ public class OwRepositoryTest {
         assertTrue(error.getMessage(), error.getMessage().contains("Unknown repository operation"));
     }
 
+    @Test public void updateByIdArityIsCheckedBeforeDatabaseAccess() {
+        RuntimeException error = assertThrows(RuntimeException.class, () -> run("""
+                @Repository("users", "id")
+                class UserRepository:
+                main:
+                  set repo: component_get("UserRepository")
+                  call: repo.updateById(7)
+                """));
+        assertTrue(error.getMessage(), error.getMessage().contains("expects 2 argument"));
+    }
+
     @Test public void rejectsInvalidArityBeforeReachingDatabase() {
         RuntimeException error = assertThrows(RuntimeException.class, () -> run("""
                 @Repository("users", "id")
