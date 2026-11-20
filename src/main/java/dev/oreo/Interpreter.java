@@ -137,6 +137,9 @@ public class Interpreter {
     private final Map<String, Ast.EnumDecl> enums = new HashMap<>();
     private final Map<String, Ast.InterfaceDecl> interfaces = new HashMap<>();
     private final Map<String, Object> globals = new HashMap<>();
+    // OW-native singleton components, scoped to this interpreter instance.
+    private final Map<String, OwObject> componentInstances = new LinkedHashMap<>();
+    private final Set<String> constructingComponents = new LinkedHashSet<>();
 
     // built-in database
     private final Map<String, Ast.ModelDecl> models = new HashMap<>();
@@ -293,6 +296,7 @@ public class Interpreter {
         // A class may declare an interface only if it supplies every public
         // method with the required arity. Validate before running any main code.
         validateInterfaceImplementations();
+        validateComponentGraph();
         if (!models.isEmpty()) loadDb();
     }
 
@@ -1457,7 +1461,8 @@ public class Interpreter {
             "sleep", "now_ms",
             "map_get", "map_has", "map_set", "map_delete",
             "map_keys", "map_values", "map_size",
-            "pack", "unpack", "module_scan", "assert", "extension"
+            "pack", "unpack", "module_scan",
+            "component_scan", "component_get", "assert", "extension"
     ));
 
     private static boolean isBuiltin(String name) { return BUILTINS.contains(name); }
@@ -1578,6 +1583,8 @@ public class Interpreter {
             }
             case "pack" -> builtinPack(call, env);
             case "module_scan" -> builtinModuleScan(call, env);
+            case "component_scan" -> builtinComponentScan(call, env);
+            case "component_get" -> builtinComponentGet(call, env);
             case "unpack" -> builtinUnpack(call, env);
             case "assert" -> builtinAssert(call, env);
             case "extension" -> invokeExtension(call, env);
@@ -1632,6 +1639,104 @@ public class Interpreter {
             if (child != null)
                 collectPublicModules(child, contract, seen, results);
         }
+    }
+
+    /** Component annotations describe OW classes, never Java reflection types. */
+    private boolean isComponent(Ast.ClassDecl cls) {
+        return cls.annotations.contains("Service") || cls.annotations.contains("Controller");
+    }
+
+    /**
+     * Validate injection edges before executing main and before constructing
+     * any component. Only exact concrete annotated classes are eligible.
+     */
+    private void validateComponentGraph() {
+        Map<String, List<String>> dependencies = new TreeMap<>();
+        for (Ast.ClassDecl cls : classes.values()) {
+            if (!isComponent(cls)) {
+                for (Ast.FieldDecl field : cls.fields)
+                    if (field.injected)
+                        throw new RuntimeException("@Inject requires @Service or @Controller: " + cls.name);
+                continue;
+            }
+            if (cls.annotations.size() != 1)
+                throw new RuntimeException("OW component must have one stereotype: " + cls.name);
+            List<String> edges = new ArrayList<>();
+            for (Ast.ClassDecl owner : classChain(cls)) {
+                for (Ast.FieldDecl field : owner.fields) {
+                    if (!field.injected) continue;
+                    Ast.ClassDecl provider = classes.get(field.typeName);
+                    if (provider == null || !isComponent(provider))
+                        throw new RuntimeException("Missing component " + field.typeName +
+                                " required by " + cls.name + "." + field.name);
+                    edges.add(field.typeName);
+                }
+            }
+            dependencies.put(cls.name, edges);
+        }
+        Set<String> finished = new HashSet<>();
+        for (String name : dependencies.keySet())
+            validateComponentVisit(name, dependencies, new LinkedHashSet<>(), finished);
+    }
+
+    private void validateComponentVisit(String name, Map<String, List<String>> graph,
+                                        Set<String> active, Set<String> finished) {
+        if (finished.contains(name)) return;
+        if (!active.add(name))
+            throw new RuntimeException("OW component dependency cycle: " + active + " -> " + name);
+        for (String required : graph.getOrDefault(name, List.of()))
+            validateComponentVisit(required, graph, active, finished);
+        active.remove(name);
+        finished.add(name);
+    }
+
+    private OwObject component(String name) {
+        Ast.ClassDecl cls = classes.get(name);
+        if (cls == null || !isComponent(cls))
+            throw new RuntimeException("Unknown OW component: " + name);
+        OwObject existing = componentInstances.get(name);
+        if (existing != null) return existing;
+        if (!constructingComponents.add(name))
+            throw new RuntimeException("OW component construction cycle: " + name);
+        try {
+            Map<String, OwObject> injections = new LinkedHashMap<>();
+            for (Ast.ClassDecl owner : classChain(cls))
+                for (Ast.FieldDecl field : owner.fields)
+                    if (field.injected)
+                        injections.put(field.name, component(field.typeName));
+            // Constructors are zero-argument. Injected fields become visible
+            // after construction; do not rely on them inside new().
+            OwObject instance = (OwObject) instantiate(
+                    new Ast.NewExpr(name, List.of()), globals);
+            for (Map.Entry<String, OwObject> injected : injections.entrySet())
+                instance.fields.put(injected.getKey(), injected.getValue());
+            componentInstances.put(name, instance);
+            return instance;
+        } finally {
+            constructingComponents.remove(name);
+        }
+    }
+
+    private Object builtinComponentScan(Ast.CallExpr call, Map<String, Object> env) {
+        requireArgCount(call, 1);
+        Object requested = evalExpr(call.args.get(0), env);
+        if (!(requested instanceof String stereotype) ||
+                !Set.of("Service", "Controller", "All").contains(stereotype))
+            throw new RuntimeException("component_scan requires Service, Controller or All");
+        List<Object> found = new ArrayList<>();
+        for (Ast.ClassDecl cls : new TreeMap<>(classes).values())
+            if (isComponent(cls) &&
+                    ("All".equals(stereotype) || cls.annotations.contains(stereotype)))
+                found.add(component(cls.name));
+        return found;
+    }
+
+    private Object builtinComponentGet(Ast.CallExpr call, Map<String, Object> env) {
+        requireArgCount(call, 1);
+        Object requested = evalExpr(call.args.get(0), env);
+        if (!(requested instanceof String name) || name.isBlank())
+            throw new RuntimeException("component_get requires an annotated OW class name");
+        return component(name);
     }
 
     private Object builtinPack(Ast.CallExpr call, Map<String, Object> env) {
