@@ -33,8 +33,15 @@ public class Parser {
                 if (check(Type.NEWLINE)) p++;
             } else if (check(Type.AT)) {
                 List<String> annotations = parseAnnotations();
-                if (!matchIdent("fn")) throw err("Test annotation must precede a function");
-                fns.add(parseFnDecl(annotations));
+                if (matchIdent("fn")) {
+                    validateAnnotations(annotations, Set.of("Test", "BeforeEach", "AfterEach"), "function");
+                    fns.add(parseFnDecl(annotations));
+                } else if (matchIdent("class")) {
+                    validateAnnotations(annotations, Set.of("Service", "Controller"), "class");
+                    classes.add(parseClass(annotations));
+                } else {
+                    throw err("OW annotation must precede a function or class");
+                }
             } else if (matchIdent("fn")) {
                 fns.add(parseFnDecl());
             } else if (matchIdent("enum")) {
@@ -82,15 +89,22 @@ public class Parser {
         List<String> annotations = new ArrayList<>();
         while (match(Type.AT)) {
             String annotation = expect(Type.IDENT).text;
-            if (!Set.of("Test", "BeforeEach", "AfterEach").contains(annotation))
-                throw err("Unsupported test annotation @" + annotation);
+            if (!Set.of("Test", "BeforeEach", "AfterEach",
+                        "Service", "Controller", "Inject").contains(annotation))
+                throw err("Unsupported OW annotation @" + annotation);
             if (!annotations.isEmpty())
-                throw err("Only one test annotation per function is supported");
+                throw err("Only one annotation per declaration is supported");
             annotations.add(annotation);
             expect(Type.NEWLINE);
             consumeNewlines();
         }
         return annotations;
+    }
+
+    private void validateAnnotations(List<String> annotations, Set<String> allowed, String target) {
+        for (String annotation : annotations)
+            if (!allowed.contains(annotation))
+                throw err("@" + annotation + " cannot annotate a " + target);
     }
 
     private Ast.FnDecl parseFnDecl() {
@@ -340,6 +354,10 @@ public class Parser {
     //   field [private|public] name [type] [: default]
     //   fn [private|public] name(params): body
     private Ast.ClassDecl parseClass() {
+        return parseClass(List.of());
+    }
+
+    private Ast.ClassDecl parseClass(List<String> annotations) {
         String name = expect(Type.IDENT).text;
         List<String> supers = new ArrayList<>();
         if (match(Type.LPAREN)) {
@@ -360,9 +378,16 @@ public class Parser {
             if (matchIdent("field")) {
                 fields.add(parseField());
             } else if (check(Type.AT)) {
-                List<String> annotations = parseAnnotations();
-                if (!matchIdent("fn")) throw err("Test annotation must precede a method");
-                methods.add(parseMethod(annotations));
+                List<String> memberAnnotations = parseAnnotations();
+                if (matchIdent("field")) {
+                    validateAnnotations(memberAnnotations, Set.of("Inject"), "field");
+                    fields.add(parseField(true));
+                } else if (matchIdent("fn")) {
+                    validateAnnotations(memberAnnotations, Set.of("Test", "BeforeEach", "AfterEach"), "method");
+                    methods.add(parseMethod(memberAnnotations));
+                } else {
+                    throw err("OW member annotation must precede a field or method");
+                }
             } else if (matchIdent("fn")) {
                 methods.add(parseMethod());
             } else {
@@ -371,10 +396,14 @@ public class Parser {
             }
         }
         expect(Type.DEDENT);
-        return new Ast.ClassDecl(name, supers, fields, methods);
+        return new Ast.ClassDecl(name, supers, fields, methods, annotations);
     }
 
     private Ast.FieldDecl parseField() {
+        return parseField(false);
+    }
+
+    private Ast.FieldDecl parseField(boolean injected) {
         boolean isPrivate = parseVisibility();
         String name = expect(Type.IDENT).text;
         String typeName = null;
@@ -386,7 +415,9 @@ public class Parser {
             def = parseExpr();
         }
         expect(Type.NEWLINE);
-        return new Ast.FieldDecl(name, isPrivate, typeName, def);
+        if (injected && (typeName == null || def != null))
+            throw err("@Inject field requires a concrete type and no initializer");
+        return new Ast.FieldDecl(name, isPrivate, typeName, def, injected);
     }
 
     private Ast.MethodDecl parseMethod() {
