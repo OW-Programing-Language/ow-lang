@@ -37,7 +37,7 @@ public class Parser {
                     validateAnnotations(annotations, Set.of("Test", "BeforeEach", "AfterEach"), "function");
                     fns.add(parseFnDecl(annotations));
                 } else if (matchIdent("class")) {
-                    validateAnnotations(annotations, Set.of("Service", "Controller"), "class");
+                    validateAnnotations(annotations, Set.of("Service", "Controller", "Repository"), "class");
                     classes.add(parseClass(annotations));
                 } else {
                     throw err("OW annotation must precede a function or class");
@@ -91,11 +91,21 @@ public class Parser {
         while (match(Type.AT)) {
             String name = expect(Type.IDENT).text;
             if (!Set.of("Test", "BeforeEach", "AfterEach", "Service", "Controller",
-                        "Inject", "GetMapping", "PostMapping", "Transactional").contains(name))
+                        "Inject", "GetMapping", "PostMapping", "Transactional", "Repository").contains(name))
                 throw err("Unsupported OW annotation @" + name);
             if (!names.add(name)) throw err("Duplicate OW annotation @" + name);
             String annotation = name;
-            if (name.equals("GetMapping") || name.equals("PostMapping")) {
+            if (name.equals("Repository")) {
+                expect(Type.LPAREN);
+                String table = expect(Type.STRING).text;
+                expect(Type.COMMA);
+                String idColumn = expect(Type.STRING).text;
+                expect(Type.RPAREN);
+                if (!table.matches("[A-Za-z_][A-Za-z_0-9]{0,62}") ||
+                        !idColumn.matches("[A-Za-z_][A-Za-z_0-9]{0,62}"))
+                    throw err("@Repository requires safe literal SQL table and ID identifiers");
+                annotation = "Repository:" + table + ":" + idColumn;
+            } else if (name.equals("GetMapping") || name.equals("PostMapping")) {
                 expect(Type.LPAREN);
                 String route = expect(Type.STRING).text;
                 expect(Type.RPAREN);
@@ -419,6 +429,9 @@ public class Parser {
             }
         }
         expect(Type.DEDENT);
+        if (annotations.stream().anyMatch(a -> a.startsWith("Repository:")) &&
+                (!fields.isEmpty() || !methods.isEmpty() || !supers.isEmpty()))
+            throw err("@Repository declares a generated persistence adapter: no fields, methods or inheritance");
         return new Ast.ClassDecl(name, supers, fields, methods, annotations);
     }
 
