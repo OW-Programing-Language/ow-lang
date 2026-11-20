@@ -380,11 +380,17 @@ public class Ast {
         public final boolean isPrivate;
         public final String typeName;   // optional, may be null
         public final Expr defaultValue; // optional, may be null
+        public final boolean injected;
         public FieldDecl(String name, boolean isPrivate, String typeName, Expr defaultValue) {
+            this(name, isPrivate, typeName, defaultValue, false);
+        }
+        public FieldDecl(String name, boolean isPrivate, String typeName, Expr defaultValue,
+                         boolean injected) {
             this.name = name;
             this.isPrivate = isPrivate;
             this.typeName = typeName;
             this.defaultValue = defaultValue;
+            this.injected = injected;
         }
     }
 
@@ -428,12 +434,19 @@ public class Ast {
         public final List<String> supers; // parent class and/or interfaces
         public final List<FieldDecl> fields;
         public final List<MethodDecl> methods;
+        public final List<String> annotations;
         public ClassDecl(String name, List<String> supers,
                          List<FieldDecl> fields, List<MethodDecl> methods) {
+            this(name, supers, fields, methods, List.of());
+        }
+        public ClassDecl(String name, List<String> supers,
+                         List<FieldDecl> fields, List<MethodDecl> methods,
+                         List<String> annotations) {
             this.name = name;
             this.supers = supers;
             this.fields = fields;
             this.methods = methods;
+            this.annotations = List.copyOf(annotations);
         }
     }
 
