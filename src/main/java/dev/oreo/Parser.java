@@ -87,13 +87,24 @@ public class Parser {
 
     private List<String> parseAnnotations() {
         List<String> annotations = new ArrayList<>();
+        Set<String> names = new HashSet<>();
         while (match(Type.AT)) {
-            String annotation = expect(Type.IDENT).text;
-            if (!Set.of("Test", "BeforeEach", "AfterEach",
-                        "Service", "Controller", "Inject").contains(annotation))
-                throw err("Unsupported OW annotation @" + annotation);
-            if (!annotations.isEmpty())
-                throw err("Only one annotation per declaration is supported");
+            String name = expect(Type.IDENT).text;
+            if (!Set.of("Test", "BeforeEach", "AfterEach", "Service", "Controller",
+                        "Inject", "GetMapping", "PostMapping", "Transactional").contains(name))
+                throw err("Unsupported OW annotation @" + name);
+            if (!names.add(name)) throw err("Duplicate OW annotation @" + name);
+            String annotation = name;
+            if (name.equals("GetMapping") || name.equals("PostMapping")) {
+                expect(Type.LPAREN);
+                String route = expect(Type.STRING).text;
+                expect(Type.RPAREN);
+                if (!route.startsWith("/") || route.isBlank() ||
+                        route.contains("?") || route.contains("#") ||
+                        route.contains(" ") || route.contains("\\"))
+                    throw err("@" + name + " requires an absolute URL path without query or fragment");
+                annotation += ":" + route;
+            }
             annotations.add(annotation);
             expect(Type.NEWLINE);
             consumeNewlines();
@@ -102,9 +113,12 @@ public class Parser {
     }
 
     private void validateAnnotations(List<String> annotations, Set<String> allowed, String target) {
-        for (String annotation : annotations)
-            if (!allowed.contains(annotation))
-                throw err("@" + annotation + " cannot annotate a " + target);
+        for (String annotation : annotations) {
+            String name = annotation.contains(":") ?
+                    annotation.substring(0, annotation.indexOf(':')) : annotation;
+            if (!allowed.contains(name))
+                throw err("@" + name + " cannot annotate a " + target);
+        }
     }
 
     private Ast.FnDecl parseFnDecl() {
@@ -383,7 +397,16 @@ public class Parser {
                     validateAnnotations(memberAnnotations, Set.of("Inject"), "field");
                     fields.add(parseField(true));
                 } else if (matchIdent("fn")) {
-                    validateAnnotations(memberAnnotations, Set.of("Test", "BeforeEach", "AfterEach"), "method");
+                    validateAnnotations(memberAnnotations, Set.of("Test", "BeforeEach", "AfterEach",
+                            "GetMapping", "PostMapping", "Transactional"), "method");
+                    if (memberAnnotations.stream().anyMatch(a ->
+                            a.startsWith("GetMapping:") || a.startsWith("PostMapping:"))) {
+                        if (!annotations.contains("Controller"))
+                            throw err("@GetMapping/@PostMapping requires @Controller");
+                        if (memberAnnotations.stream().filter(a ->
+                                a.startsWith("GetMapping:") || a.startsWith("PostMapping:")).count() != 1)
+                            throw err("A controller method can declare only one HTTP mapping");
+                    }
                     methods.add(parseMethod(memberAnnotations));
                 } else {
                     throw err("OW member annotation must precede a field or method");
