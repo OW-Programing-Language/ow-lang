@@ -140,6 +140,10 @@ public class Interpreter {
     // OW-native singleton components, scoped to this interpreter instance.
     private final Map<String, OwObject> componentInstances = new LinkedHashMap<>();
     private final Set<String> constructingComponents = new LinkedHashSet<>();
+    // Transaction propagation is REQUIRED within an interpreter thread.
+    private final ThreadLocal<Integer> transactionalDepth = ThreadLocal.withInitial(() -> 0);
+    private final ThreadLocal<Boolean> transactionRollbackOnly =
+            ThreadLocal.withInitial(() -> false);
 
     // built-in database
     private final Map<String, Ast.ModelDecl> models = new HashMap<>();
@@ -1073,6 +1077,71 @@ public class Interpreter {
     }
 
     private Object invokeMethodDecl(OwObject obj, Ast.MethodDecl m, List<Object> args) {
+        if (m.annotations.contains("Transactional"))
+            return invokeTransactionalMethod(obj, m, args);
+        return invokeMethodBody(obj, m, args);
+    }
+
+    /** REQUIRED propagation: nested annotated methods join the outer transaction.
+     * Any nested failure marks the outer transaction rollback-only, even when
+     * the caller catches the exception and continues processing.
+     */
+    private Object invokeTransactionalMethod(OwObject obj, Ast.MethodDecl m, List<Object> args) {
+        int depth = transactionalDepth.get();
+        boolean owner = depth == 0;
+        if (owner) {
+            invokeTransactionExtension("night.data.begin");
+            transactionRollbackOnly.set(false);
+        }
+        transactionalDepth.set(depth + 1);
+        try {
+            Object result = invokeMethodBody(obj, m, args);
+            if (owner) {
+                if (transactionRollbackOnly.get()) {
+                    invokeTransactionExtension("night.data.rollback");
+                    throw new IllegalStateException("Night transaction marked rollback-only");
+                }
+                invokeTransactionExtension("night.data.commit");
+            }
+            return result;
+        } catch (RuntimeException | Error failure) {
+            transactionRollbackOnly.set(true);
+            if (owner) {
+                try {
+                    // A failed commit/rollback may already have released the
+                    // connection. Preserve the original failure message.
+                    invokeTransactionExtension("night.data.rollback");
+                } catch (RuntimeException cleanup) {
+                    failure.addSuppressed(cleanup);
+                }
+            }
+            throw failure;
+        } finally {
+            if (owner) {
+                transactionalDepth.remove();
+                transactionRollbackOnly.remove();
+            } else {
+                transactionalDepth.set(depth);
+            }
+        }
+    }
+
+    private void invokeTransactionExtension(String operation) {
+        RuntimeExtension matching = null;
+        for (RuntimeExtension candidate : extensions) {
+            if (!candidate.supports(operation)) continue;
+            if (matching != null)
+                throw new IllegalStateException("Ambiguous OW transaction extension: " + operation);
+            matching = candidate;
+        }
+        if (matching == null)
+            throw new IllegalStateException("@Transactional requires the Night JDBC runtime extension");
+        Object result = matching.invoke(operation, List.of());
+        if (!(result instanceof Number n) || n.intValue() != 1)
+            throw new IllegalStateException("Night transaction operation unsuccessful: " + operation);
+    }
+
+    private Object invokeMethodBody(OwObject obj, Ast.MethodDecl m, List<Object> args) {
         if (m.params.size() != args.size()) {
             throw new RuntimeException("Method " + m.name + " expects "
                     + m.params.size() + " args, got " + args.size());
@@ -1462,7 +1531,8 @@ public class Interpreter {
             "map_get", "map_has", "map_set", "map_delete",
             "map_keys", "map_values", "map_size",
             "pack", "unpack", "module_scan",
-            "component_scan", "component_get", "assert", "extension"
+            "component_scan", "component_get", "component_mount",
+            "assert", "extension"
     ));
 
     private static boolean isBuiltin(String name) { return BUILTINS.contains(name); }
@@ -1585,6 +1655,7 @@ public class Interpreter {
             case "module_scan" -> builtinModuleScan(call, env);
             case "component_scan" -> builtinComponentScan(call, env);
             case "component_get" -> builtinComponentGet(call, env);
+            case "component_mount" -> builtinComponentMount(call, env);
             case "unpack" -> builtinUnpack(call, env);
             case "assert" -> builtinAssert(call, env);
             case "extension" -> invokeExtension(call, env);
@@ -1674,6 +1745,23 @@ public class Interpreter {
             }
             dependencies.put(cls.name, edges);
         }
+        // Validate route mapping contracts before main or any server starts.
+        Set<String> routes = new HashSet<>();
+        for (Ast.ClassDecl cls : classes.values()) {
+            for (Ast.MethodDecl method : cls.methods) {
+                for (String annotation : method.annotations) {
+                    String spec = mappingSpec(annotation);
+                    if (spec == null) continue;
+                    if (!cls.annotations.contains("Controller"))
+                        throw new RuntimeException("HTTP mapping requires @Controller: " + cls.name);
+                    if (method.isPrivate || !method.params.isEmpty())
+                        throw new RuntimeException("Mapped OW controller method must be public and argument-free: " +
+                                cls.name + "." + method.name);
+                    if (!routes.add(spec))
+                        throw new RuntimeException("Duplicate annotated OW route: " + spec);
+                }
+            }
+        }
         Set<String> finished = new HashSet<>();
         for (String name : dependencies.keySet())
             validateComponentVisit(name, dependencies, new LinkedHashSet<>(), finished);
@@ -1737,6 +1825,50 @@ public class Interpreter {
         if (!(requested instanceof String name) || name.isBlank())
             throw new RuntimeException("component_get requires an annotated OW class name");
         return component(name);
+    }
+
+    /** Values are already parsed and validated by OW's parser. */
+    private static String mappingSpec(String annotation) {
+        if (annotation.startsWith("GetMapping:")) return "GET " + annotation.substring(11);
+        if (annotation.startsWith("PostMapping:")) return "POST " + annotation.substring(12);
+        return null;
+    }
+
+    /**
+     * Mount a fully imported OW controller without a manual mount() method.
+     * Legacy controllers still use mount(); mapped and manual styles cannot
+     * be mixed for one controller, preventing duplicate routes.
+     */
+    private Object builtinComponentMount(Ast.CallExpr call, Map<String, Object> env) {
+        requireArgCount(call, 1);
+        Object candidate = evalExpr(call.args.get(0), env);
+        if (!(candidate instanceof OwObject controller) ||
+                !controller.cls.annotations.contains("Controller"))
+            throw new IllegalArgumentException("component_mount requires an @Controller instance");
+        List<Ast.MethodDecl> mapped = new ArrayList<>();
+        for (Ast.MethodDecl method : controller.cls.methods)
+            if (method.annotations.stream().anyMatch(a -> mappingSpec(a) != null))
+                mapped.add(method);
+        if (mapped.isEmpty())
+            return invokeMethod(controller, "mount", List.of(), true);
+        if (findMethod(controller.cls, "mount") != null)
+            throw new IllegalStateException("Controller cannot mix HTTP mapping annotations and mount(): " +
+                    controller.cls.name);
+        if (web == null) web = new WebRuntime(this, out);
+        // The same OW AST/dispatch is used for annotated and explicit routes,
+        // keeping auth interceptors, request context, and response handling.
+        for (Ast.MethodDecl method : mapped) {
+            String spec = null;
+            for (String annotation : method.annotations) {
+                String found = mappingSpec(annotation);
+                if (found != null) spec = found;
+            }
+            Ast.Expr target = new Ast.CallExpr("component_get",
+                    List.of(new Ast.StringLit(controller.cls.name)));
+            Ast.Expr invoke = new Ast.MethodCall(target, method.name, List.of());
+            web.register(spec, List.of(new Ast.RespondStmt(invoke)));
+        }
+        return mapped.size();
     }
 
     private Object builtinPack(Ast.CallExpr call, Map<String, Object> env) {
