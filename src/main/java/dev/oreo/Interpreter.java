@@ -1069,6 +1069,8 @@ public class Interpreter {
 
     private Object invokeMethod(OwObject obj, String name, List<Object> args, boolean external) {
         Ast.MethodDecl m = findMethod(obj.cls, name);
+        if (m == null && repositoryMetadata(obj.cls) != null)
+            return invokeRepository(obj.cls, name, args);
         if (m == null) throw new RuntimeException("Class " + obj.cls.name + " has no method '" + name + "'");
         if (m.isPrivate && external) {
             throw new RuntimeException("Method '" + name + "' of " + obj.cls.name + " is private");
@@ -1714,7 +1716,49 @@ public class Interpreter {
 
     /** Component annotations describe OW classes, never Java reflection types. */
     private boolean isComponent(Ast.ClassDecl cls) {
-        return cls.annotations.contains("Service") || cls.annotations.contains("Controller");
+        return cls.annotations.contains("Service") || cls.annotations.contains("Controller") ||
+                repositoryMetadata(cls) != null;
+    }
+
+    private static String repositoryMetadata(Ast.ClassDecl cls) {
+        for (String annotation : cls.annotations)
+            if (annotation.startsWith("Repository:")) return annotation.substring("Repository:".length());
+        return null;
+    }
+
+    /**
+     * Repository operations are OW-native method dispatch, not generated
+     * Java sources or reflection. Database adapter is supplied by Night's
+     * RuntimeExtension and participates in the current JDBC transaction.
+     */
+    private Object invokeRepository(Ast.ClassDecl cls, String method, List<Object> args) {
+        String[] mapping = repositoryMetadata(cls).split(":", -1);
+        if (mapping.length != 2)
+            throw new IllegalStateException("Invalid @Repository metadata for " + cls.name);
+        int expected = switch (method) {
+            case "save", "findById", "existsById", "deleteById" -> 1;
+            case "updateById" -> 2;
+            case "findAll" -> 0;
+            case "page" -> 3;
+            default -> throw new RuntimeException("Unknown repository operation: " + method);
+        };
+        if (args.size() != expected)
+            throw new RuntimeException("Repository." + method + " expects " + expected + " argument(s)");
+        String operation = "night.data.repo." + method;
+        RuntimeExtension target = null;
+        for (RuntimeExtension candidate : extensions) {
+            if (!candidate.supports(operation)) continue;
+            if (target != null)
+                throw new IllegalStateException("Ambiguous Night repository extension");
+            target = candidate;
+        }
+        if (target == null)
+            throw new IllegalStateException("@Repository requires Night's JDBC platform extension");
+        List<Object> parameters = new ArrayList<>();
+        parameters.add(mapping[0]);
+        parameters.add(mapping[1]);
+        parameters.addAll(args);
+        return target.invoke(operation, parameters);
     }
 
     /**
@@ -1727,11 +1771,14 @@ public class Interpreter {
             if (!isComponent(cls)) {
                 for (Ast.FieldDecl field : cls.fields)
                     if (field.injected)
-                        throw new RuntimeException("@Inject requires @Service or @Controller: " + cls.name);
+                        throw new RuntimeException("@Inject requires an OW component: " + cls.name);
                 continue;
             }
             if (cls.annotations.size() != 1)
                 throw new RuntimeException("OW component must have one stereotype: " + cls.name);
+            if (repositoryMetadata(cls) != null && 
+                    (!cls.methods.isEmpty() || !cls.fields.isEmpty() || !cls.supers.isEmpty()))
+                throw new RuntimeException("@Repository may only declare generated CRUD methods: " + cls.name);
             List<String> edges = new ArrayList<>();
             for (Ast.ClassDecl owner : classChain(cls)) {
                 for (Ast.FieldDecl field : owner.fields) {
@@ -1809,12 +1856,13 @@ public class Interpreter {
         requireArgCount(call, 1);
         Object requested = evalExpr(call.args.get(0), env);
         if (!(requested instanceof String stereotype) ||
-                !Set.of("Service", "Controller", "All").contains(stereotype))
-            throw new RuntimeException("component_scan requires Service, Controller or All");
+                !Set.of("Service", "Controller", "Repository", "All").contains(stereotype))
+            throw new RuntimeException("component_scan requires Service, Controller, Repository or All");
         List<Object> found = new ArrayList<>();
         for (Ast.ClassDecl cls : new TreeMap<>(classes).values())
             if (isComponent(cls) &&
-                    ("All".equals(stereotype) || cls.annotations.contains(stereotype)))
+                    ("All".equals(stereotype) || cls.annotations.contains(stereotype) ||
+                            ("Repository".equals(stereotype) && repositoryMetadata(cls) != null)))
                 found.add(component(cls.name));
         return found;
     }
